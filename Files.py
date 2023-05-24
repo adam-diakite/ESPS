@@ -209,7 +209,7 @@ def save_all_tumour_slices(folder_path):
 
 
 
-def process_directories_general(root_directory):
+def process_database(root_directory):
     """
     Recursively process directories and apply save_tumour_slice() to each directory
     :param root_directory: the root directory to process
@@ -245,20 +245,11 @@ def copy_nii_files(folder_path):
 
 
 
-#delete_image_dirs((root_dir))
-process_directories_general('/media/adamdiakite/LaCie/database_dijon')
+
+#process_database('/media/adamdiakite/LaCie/database_dijon')
 
 # Cleaning the dataset : Deletes the folders where there aren't any segmentations
 # delete_dirs_without_dcm_nii(root_dir)
 
-# Print the selected single slice + corresponding .dcm file
-# print(get_tumour_slice(single_folder))
-
-# For a patient, saves the image with the most lesion area AND all images with lesion areas in two separate folders.
-# print(save_all_tumour_slices(single_folder))
-# print(save_tumour_slice(single_folder))
-
-# Going through all databases and saving the single selected .dcm file into a separate folder.
-# print(process_directories(folder_path))
-
-
+#cleaning for errors
+delete_image_dirs('/media/adamdiakite/LaCie/database_dijon')

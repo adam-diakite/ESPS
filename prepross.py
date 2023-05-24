@@ -389,8 +389,6 @@ def multi_input_array(folder_path):
     return zoomed_slices, patient_id
 
 
-
-
 def save_array_to_hdf5(array, filename):
     """
     Save the image with the largest tumor to an hdf5 file
