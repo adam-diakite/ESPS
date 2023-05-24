@@ -415,7 +415,7 @@ def save_array_to_hdf5(array, filename):
         group['target'] = 1
 
 
-def save_arrays_to_hdf5(array, patient_id): xd
+def save_arrays_to_hdf5(array, patient_id):
     """
     Save all the tumor images in an HDF5 file.
     :param array: List or array of tumor images (output of multi_input_array)
