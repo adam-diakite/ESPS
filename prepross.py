@@ -8,6 +8,7 @@ from matplotlib.widgets import Slider
 import nibabel as nib
 import cv2
 import re
+from sklearn import preprocessing
 
 root_dir = '/home/adamdiakite/Images/Patient_Vincent_PP'
 path = '/home/adamdiakite/Images/Patient_Vincent_PP/0/scans'
@@ -329,66 +330,6 @@ def single_input_array(folder_path):
 
     return zoomed_slice
 
-
-def multi_input_array(folder_path):
-    """
-    Creates 224x224 tumor images from .nii files.
-    :param folder_path: path to segmentation and scan folder
-    :return: zoomed_slices, patient_id
-    """
-    files = os.listdir(folder_path)
-    scan_path = None
-    mask_path = None
-
-    # Find scan and mask files
-    for file in files:
-        if 'nii.gz' in file:
-            scan_path = os.path.join(folder_path, file)
-        elif '.nii' in file:
-            mask_path = os.path.join(folder_path, file)
-
-    if scan_path is None or mask_path is None:
-        print('Scan or mask file not found')
-        return None, None
-
-    # Load scan and mask data
-    scan_img = nib.load(scan_path)
-    mask_img = nib.load(mask_path)
-
-    scan_data = scan_img.get_fdata()
-    mask_data = mask_img.get_fdata()
-
-    tumor_coords = mask_data.nonzero()
-    min_x, max_x = min(tumor_coords[1]), max(tumor_coords[1])
-    min_y, max_y = min(tumor_coords[0]), max(tumor_coords[0])
-    tumor_width = max_x - min_x
-    tumor_height = max_y - min_y
-    center_x = (max_x + min_x) // 2
-    center_y = (max_y + min_y) // 2
-
-    # Calculate the zoomed bounding box coordinates
-    zoomed_min_x = max(center_x - tumor_width // 2, 0)
-    zoomed_max_x = min(center_x + tumor_width // 2, scan_data.shape[1] - 1)
-    zoomed_min_y = max(center_y - tumor_height // 2, 0)
-    zoomed_max_y = min(center_y + tumor_height // 2, scan_data.shape[0] - 1)
-
-    zoomed_slices = []
-    output_size = (224, 224)
-
-    for slice_index in range(scan_data.shape[2]):
-        if np.any(mask_data[:, :, slice_index]):
-            zoomed_slice = scan_data[zoomed_min_y:zoomed_max_y, zoomed_min_x:zoomed_max_x, slice_index]
-            # Apply interpolation if needed
-            zoomed_slice_resized = cv2.resize(zoomed_slice, output_size)
-            zoomed_slices.append(zoomed_slice_resized)
-
-    # Extract patient ID from scan file name
-    file_name = os.path.basename(scan_path)
-    patient_id = file_name[:9]  # Extract the first 9 characters
-
-    return zoomed_slices, patient_id
-
-
 def save_array_to_hdf5(array, filename):
     """
     Save the image with the largest tumor to an hdf5 file
@@ -413,10 +354,78 @@ def save_array_to_hdf5(array, filename):
         group['target'] = 1
 
 
-def save_arrays_to_hdf5(array, patient_id):
+
+def multi_input_array(folder_path):
+    """
+    Creates 224x224 tumor images from .nii files.
+    :param folder_path: path to segmentation and scan folder
+    :return: zoomed_slices, tumor_area, patient_id
+    """
+    files = os.listdir(folder_path)
+    scan_path = None
+    mask_path = None
+
+    # Find scan and mask files
+    for file in files:
+        if 'nii.gz' in file:
+            scan_path = os.path.join(folder_path, file)
+        elif '.nii' in file:
+            mask_path = os.path.join(folder_path, file)
+
+    if scan_path is None or mask_path is None:
+        print('Scan or mask file not found')
+        return None, None, None
+
+    # Load scan and mask data
+    scan_img = nib.load(scan_path)
+    mask_img = nib.load(mask_path)
+
+    scan_data = scan_img.get_fdata()
+    mask_data = mask_img.get_fdata()
+
+    # Coordonnées de la tumeur en se servant du masque
+    tumor_coords = mask_data.nonzero()
+    min_x, max_x = min(tumor_coords[1]), max(tumor_coords[1])
+    min_y, max_y = min(tumor_coords[0]), max(tumor_coords[0])
+    tumor_width = max_x - min_x
+    tumor_height = max_y - min_y
+    center_x = (max_x + min_x) // 2
+    center_y = (max_y + min_y) // 2
+
+    # Calculate the zoomed bounding box coordinates
+    zoomed_min_x = max(center_x - tumor_width // 2, 0)
+    zoomed_max_x = min(center_x + tumor_width // 2, scan_data.shape[1] - 1)
+    zoomed_min_y = max(center_y - tumor_height // 2, 0)
+    zoomed_max_y = min(center_y + tumor_height // 2, scan_data.shape[0] - 1)
+
+    zoomed_slices = []
+    tumor_area = []
+    output_size = (224, 224)
+
+    for slice_index in range(scan_data.shape[2]):
+        if np.any(mask_data[:, :, slice_index]):
+            zoomed_slice = scan_data[zoomed_min_y:zoomed_max_y, zoomed_min_x:zoomed_max_x, slice_index]
+            # Apply interpolation if needed
+            zoomed_slice_resized = cv2.resize(zoomed_slice, output_size)
+            zoomed_slices.append(zoomed_slice_resized)
+            tumor_area.append(np.sum(mask_data[:, :, slice_index]))
+
+    # Extract patient ID from scan file name
+    file_name = os.path.basename(scan_path)
+    patient_id = file_name[:9]  # Extract the first 9 characters
+    print(patient_id)
+    return zoomed_slices, patient_id, tumor_area
+
+
+
+from sklearn import preprocessing
+
+
+def save_arrays_to_hdf5(array, patient_id, tumor_area):
     """
     Save all the tumor images in an HDF5 file.
     :param array: List or array of tumor images (output of multi_input_array)
+    :param tumor_area: List or array of tumor areas corresponding to each slice
     :param patient_id: Patient ID
     :return: None
     """
@@ -427,29 +436,57 @@ def save_arrays_to_hdf5(array, patient_id):
 
     filename = os.path.join(folder_path, f'{patient_id}.hdf5')
 
-    with h5py.File(filename, 'w') as f:
-        # Create a dataset for the patient ID
+    if os.path.exists(filename):
+        print(f"HDF5 file for patient {patient_id} already exists. Skipping processing.")
+        return
 
-        for i, element in enumerate(array):
-            slice_group = f.create_group(f'slice_{i}')
+    try:
+        with h5py.File(filename, 'w') as f:
+            # Create a dataset for the patient ID
 
-            f_array = array[i].astype(np.float32)
-            min_val = np.min(f_array)
-            max_val = np.max(f_array)
-            scaled_arr = (f_array - min_val) / (max_val - min_val)  # Scale between 0 and 1
-            scaled_arr = 2 * scaled_arr - 1
-            scaled_arr = np.where(scaled_arr > 0, 1, 0)
+            for i, element in enumerate(array):
+                slice_group = f.create_group(f'slice_{i}')
 
-            slice_group.create_dataset('train', data=scaled_arr, track_order=True)
-            slice_group.create_dataset('target', shape=(), dtype='int64', data=1)
+                # image scan
+                f_array = array[i].astype(np.float32)
 
-            # Calculate tumor area
-            tumor_area = np.sum(scaled_arr > 0)  # Count the number of elements above 0
-            slice_group.create_dataset('tumor_area', shape=(), dtype='int64', data=tumor_area)
+                min_max_scaler = preprocessing.MinMaxScaler(feature_range=(-1.0, 1.0), copy=False)
+                scaled_arr = min_max_scaler.fit_transform(f_array)
 
-    print("Arrays saved to HDF5 file.")
+                # group creation in hdf5
+                slice_group.create_dataset('train', data=scaled_arr, track_order=True)
+                slice_group.create_dataset('target', shape=(), dtype='int64', data=1)
+
+                # Get tumor area from the provided tumor_area parameter
+                tumor_area_value = tumor_area[i]
+                slice_group.create_dataset('tumor_area', shape=(), dtype='int64', data=tumor_area_value)
+
+        print("Arrays saved to HDF5 file.")
+    except EOFError as e:
+        print(f"Error encountered while saving HDF5 file: {e}")
+        print("Skipping to the next file.")
 
 
-array, patient_id = multi_input_array(path)
-save_arrays_to_hdf5(array, patient_id)
 
+
+
+
+def process_scan_folder(root_folder):
+    """
+    Process only 'scans' folders in an entire dataset.
+    :param root_folder: Root folder of the dataset
+    :return: None
+    """
+    for root, dirs, files in os.walk(root_folder):
+        for folder_name in dirs:
+            folder_path = os.path.join(root, folder_name)
+            if folder_name.lower() == 'scans':
+                # Process 'scans' subfolder
+                result = multi_input_array(folder_path)
+                if result is not None:
+                    array, patient_id, tumor_area = result
+                    save_arrays_to_hdf5(array, patient_id, tumor_area)
+
+
+root_folder = '/media/adamdiakite/LaCie/database_paris'
+process_scan_folder(root_folder)
