@@ -9,8 +9,6 @@ import copy
 import os
 import numpy
 import sys
-
-import numpy as np
 import torch
 import tqdm
 from torch import distributed
@@ -123,6 +121,9 @@ def train(args):
     torch.cuda.empty_cache()
 
 
+
+import matplotlib.pyplot as plt
+
 def test(input_dir_test, batch_size, model=None):
     model = torch.load('/home/adamdiakite/Documents/ESPS-main/weights/best_pt_OA.pt', map_location='cuda')[
         'model'].float().eval()
@@ -148,7 +149,7 @@ def test(input_dir_test, batch_size, model=None):
             top1.update(acc1[0].item(), images.size(0))
 
             data.append((str(name), acc1[0].item(), preds, target, tumor))
-            print(name, preds, acc1, target)
+            print(name, "prediction score = ", preds)
 
     # Sort the data based on names
     sorted_data = sorted(data, key=lambda x: natural_sort_key(x[0]))
@@ -161,8 +162,10 @@ def test(input_dir_test, batch_size, model=None):
     indices = range(len(sorted_names))
     # find index of max score slice
     max_accuracy = max(sorted_accuracy)
+    max_accuracy_index = sorted_accuracy.index(max_accuracy)
     # find the volume of the max score slice
     max_surface = max(sorted_areas)
+    max_surface_index = sorted_areas.index(max_surface)
 
     # find index of average accuracy
     average_accuracy = sum(sorted_accuracy) / len(sorted_accuracy)
@@ -193,16 +196,34 @@ def test(input_dir_test, batch_size, model=None):
     dataframe.loc[dataframe['ID'] == patient_id, 'max surface'] = max_surface
     dataframe.loc[dataframe['ID'] == patient_id, 'average surface'] = average_surface
 
-    # Set display options to show all columns
-    pd.set_option('display.max_columns', None)
-    pd.set_option('display.width', 1000)
+    # Plotting accuracy and tumor area for each slice against the slice name
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+    ax2 = ax1.twinx()
+
+    # Plot prediction scores
+    ax1.plot(sorted_names, sorted_accuracy, 'o-', color='blue')
+    ax1.set_xlabel('Slice Name')
+    ax1.set_ylabel('Accuracy')
+    ax1.set_title('Accuracy and Tumor Area for each Slice')
+    ax1.tick_params(axis='x', rotation=90)
+
+    # Plot tumor areas
+    ax2.plot(sorted_names, sorted_areas, 'o-', color='red')
+    ax2.set_ylabel('Tumor Area')
+
+    # Adjust the spacing between subplots
+    fig.tight_layout()
+
+    plt.show()
 
     # Save the DataFrame as a CSV file
-    output_file = '/home/adamdiakite/Documents/ESPS-main/Test/preds.csv'  # Specify the output file path
-    dataframe.to_csv(output_file, index=False)  # Save DataFrame as CSV without index
-    print("Dataframe saved at", output_file)
+    # output_file = '/home/adamdiakite/Documents/ESPS-main/Test/preds_solo.csv'  # Specify the output file path
+    # dataframe.to_csv(output_file, index=False)  # Save DataFrame as CSV without index
+    # print("Dataframe saved at", output_file)
 
     return acc1
+
+
 
 def test1(input_dir_test, batch_size, model=None, dataframe=None):
     model = torch.load('/home/adamdiakite/Documents/ESPS-main/weights/best_pt_OA.pt', map_location='cuda')[
@@ -240,36 +261,46 @@ def test1(input_dir_test, batch_size, model=None, dataframe=None):
     sorted_areas = [item[4] for item in sorted_data]
 
     # find index of max score slice
-    max_accuracy = max(sorted_accuracy)
+    max_accuracy = max(sorted_accuracy) if sorted_accuracy else None
+    min_accuracy = min(sorted_accuracy) if sorted_accuracy else None
+
+    volume = sum(sorted_areas) if sorted_areas else None
+
     # find the volume of the max score slice
-    max_surface = max(sorted_areas)
+    max_surface = max(sorted_areas) if sorted_areas else None
 
     # find index of average accuracy
-    average_accuracy = sum(sorted_accuracy) / len(sorted_accuracy)
-    average_surface = sum(sorted_areas) / len(sorted_areas)
+    average_accuracy = sum(sorted_accuracy) / len(sorted_accuracy) if sorted_accuracy else None
+    average_surface = sum(sorted_areas) / len(sorted_areas) if sorted_areas else None
 
     # Print patient ID
     patient_id = input_dir_test[-14:-5]
     print("Patient ID:", patient_id)
 
     # converting into floats to fit dataframe
-    max_accuracy = float(max_accuracy)
-    average_accuracy = float(average_accuracy)
-    max_surface = float(max_surface)
-    average_surface = float(average_surface)
-    preds = [float(x) for x in sorted_accuracy]
+    max_accuracy = float(max_accuracy) if sorted_accuracy else None
+    min_accuracy = float(min_accuracy) if sorted_accuracy else None
+    average_accuracy = float(average_accuracy) if sorted_accuracy else None
+    volume = float(volume) if sorted_areas else None
+    max_surface = float(max_surface) if sorted_areas else None
+    average_surface = float(average_surface) if sorted_areas else None
+    preds = [float(x) for x in sorted_accuracy] if sorted_accuracy else None
+    sorted_areas = [float(x) for x in sorted_areas] if sorted_areas else None
 
     # Update the dataframe with values based on patient ID
     dataframe.loc[dataframe['ID'] == patient_id, 'max score'] = max_accuracy
+    dataframe.loc[dataframe['ID'] == patient_id, 'min score'] = min_accuracy
+    dataframe.loc[dataframe['ID'] == patient_id, 'volume'] = volume
     dataframe.loc[dataframe['ID'] == patient_id, 'average score'] = average_accuracy
     dataframe.loc[dataframe['ID'] == patient_id, 'max surface'] = max_surface
     dataframe.loc[dataframe['ID'] == patient_id, 'average surface'] = average_surface
 
-    # for i, name in enumerate(sorted_names):
-    #     column_name = f"Slice {i}"
-    #     if column_name not in dataframe.columns:
-    #         dataframe[column_name] = np.nan
-    #     dataframe.loc[dataframe['ID'] == patient_id, column_name] = preds[i]
+    for i, name in enumerate(sorted_names):
+        column_name = f"Slice {i}"
+        if column_name not in dataframe.columns:
+            dataframe[column_name] = np.nan
+        dataframe.loc[dataframe['ID'] == patient_id, column_name] = preds[i]
+        dataframe.loc[dataframe['ID'] == patient_id, column_name + '_surface'] = sorted_areas[i]
 
     return dataframe
 
@@ -317,6 +348,19 @@ def benchmark(args):
     util.print_benchmark(shape)
 
 
+
+def apply_test_recursive(folder_path, batch_size):
+    # Iterate over all files and directories in the folder
+    for root, dirs, files in os.walk(folder_path):
+        for file in files:
+            if file.endswith(".h5") or file.endswith(".hdf5"):
+                file_path = os.path.join(root, file)
+                test(file_path, batch_size)
+
+
+
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", default=0, type=int)
@@ -327,7 +371,7 @@ def main():
     # parser.add_argument('--input_dir_train', type=str, default="/home/adamdiakite/Documents/ESPS-main/Test/Open_Access_Data.hdf5")
     # parser.add_argument('--input_dir_val', type=str, default="/home/adamdiakite/Documents/ESPS-main/Test/Open_Access_Data.hdf5t")
     parser.add_argument('--input_dir_test', type=str,
-                        default="/home/adamdiakite/Documents/ESPS-main/Test/patient_data/2-21-0001.hdf5")
+                        default="/home/adamdiakite/Documents/ESPS-main/Test/patient_data/2-21-0009.hdf5")
 
     args = parser.parse_args()
     args.distributed = False
@@ -351,12 +395,15 @@ def main():
         benchmark(args)
 
 
-
-    #test("/home/adamdiakite/Documents/ESPS-main/Test/patient_data/2-21-0001.hdf5", batch_size=1)
-
-    input_dir = '/home/adamdiakite/Documents/ESPS-main/Test/patient_data'  # Directory path containing HDF5 files
     batch_size = 1
-    output_file = '/home/adamdiakite/Documents/ESPS-main/Test/preds.csv'  # Output file path for saving the dataframe
+    #apply_test_recursive("/home/adamdiakite/Documents/ESPS-main/HDF5_Test/patient_data", batch_size)
+
+
+
+    input_dir = '/home/adamdiakite/Documents/ESPS-main/HDF5_Test/patient_data_uniform'  # Directory path containing HDF5 files
+    batch_size = 1
+    output_file = '/home/adamdiakite/Documents/ESPS-main/HDF5_Test/predictions_uniform.csv'
+
 
     # Initialize an empty dataframe
     final_dataframe = pd.DataFrame(columns=['ID', 'max score', 'average score', 'max surface', 'average surface'])
@@ -381,7 +428,6 @@ def main():
 
     merged_dataframe = pd.merge(final_dataframe, tki_data, on='ID', how='left')
     # Save the merged dataframe as a CSV file
-    output_file = '/home/adamdiakite/Documents/ESPS-main/Test/preds.csv'
     merged_dataframe.to_csv(output_file, index=False)
     print("Merged dataframe saved at", output_file)
 

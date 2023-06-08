@@ -10,8 +10,8 @@ import cv2
 import re
 from sklearn import preprocessing
 
-root_dir = '/home/adamdiakite/Images/Patient_Vincent_PP'
-path = '/home/adamdiakite/Images/Patient_Vincent_PP/0/scans'
+root_folder = '/media/adamdiakite/LaCie/database_paris'
+save_folder = '/media/adamdiakite/LaCie/save'
 
 
 def read_dicom_folder(folder_path):
@@ -159,9 +159,9 @@ def read_dicom_folder_mask(folder_path):
 
 def display_seg(folder_path):
     """
-    Display the image, the segmentation mask and the zoomed tumor
-    :param folder_path:
-    :return:
+    Display the image, the segmentation mask, and the zoomed tumor
+    :param folder_path: Path to the folder containing the scan and mask files
+    :return: None
     """
     # Read files from folder
     files = os.listdir(folder_path)
@@ -170,10 +170,10 @@ def display_seg(folder_path):
 
     # Find scan and mask files
     for file in files:
-        if 'nii.gz' in file:
-            scan_path = os.path.join(folder_path, file)
-        elif '.nii' in file:
+        if 'segmentation' in file.lower() or file.endswith('.nii'):
             mask_path = os.path.join(folder_path, file)
+        else:
+            scan_path = os.path.join(folder_path, file)
 
     if scan_path is None or mask_path is None:
         print('Scan or mask file not found')
@@ -190,11 +190,11 @@ def display_seg(folder_path):
     fig, axs = plt.subplots(1, 3, figsize=(15, 5))
 
     # Display the scan as an image
-    scan_slice = scan_data[:, :, scan_data.shape[2] // 2]  # Take a slice from the middle
+    scan_slice = np.rot90(scan_data[:, :, scan_data.shape[2] // 2])  # Rotate the slice clockwise
     scan_im = axs[0].imshow(scan_slice, cmap='gray', origin='lower')
 
     # Display the mask as an overlay
-    mask_im = axs[0].imshow(mask_data[:, :, mask_data.shape[2] // 2], cmap='Reds', alpha=0.3, origin='lower')
+    mask_im = axs[0].imshow(np.rot90(mask_data[:, :, mask_data.shape[2] // 2]), cmap='Reds', alpha=0.3, origin='lower')
 
     # Set plot title and labels for the scan and mask overlay
     axs[0].set_title('Scan with Mask Overlay')
@@ -202,7 +202,7 @@ def display_seg(folder_path):
     axs[0].set_ylabel('Y')
 
     # Create a new axis for the zoomed view
-    axs[1] = plt.subplot(1, 3, 2)
+    axs[1] = plt.subplot(1, 2, 2)
     axs[1].set_title('Zoomed View')
 
     # Get the tumor coordinates from the mask
@@ -223,12 +223,10 @@ def display_seg(folder_path):
     # Display the zoomed view
     output_size = (224, 224)
     zoomed_scan = scan_data[zoomed_min_y:zoomed_max_y, zoomed_min_x:zoomed_max_x, :]
-    # zoomed_scan_resized = resize(zoomed_scan, (224, 224))
-
     zoomed_scan_resized = ndimage.zoom(zoomed_scan, (output_size[0] / zoomed_scan.shape[0],
                                                      output_size[1] / zoomed_scan.shape[1],
                                                      1), order=3)
-    zoomed_im = axs[1].imshow(zoomed_scan_resized[:, :, scan_data.shape[2] // 2], cmap='gray', origin='lower')
+    zoomed_im = axs[1].imshow(np.rot90(zoomed_scan_resized[:, :, scan_data.shape[2] // 2]), cmap='gray', origin='lower')
 
     # Set plot title and labels for the zoomed view
     axs[1].set_xlabel('X')
@@ -238,24 +236,44 @@ def display_seg(folder_path):
     largest_slice_index = np.argmax(np.sum(mask_data, axis=(0, 1)))
 
     zoomed_scan = scan_data[zoomed_min_y:zoomed_max_y, zoomed_min_x:zoomed_max_x, :]
-    # zoomed_scan_resized = resize(zoomed_scan, (224, 224))
-
     zoomed_scan_resized = ndimage.zoom(zoomed_scan, (output_size[0] / zoomed_scan.shape[0],
                                                      output_size[1] / zoomed_scan.shape[1],
                                                      1), order=3)
 
-    zoomed_slice = zoomed_scan_resized[:, :, largest_slice_index]
+    zoomed_slice = np.rot90(zoomed_scan_resized[:, :, largest_slice_index])  # Rotate the slice clockwise
 
-    axs[2].imshow(zoomed_slice, cmap='gray', origin='lower')
+    axs[1].imshow(zoomed_slice, cmap='gray', origin='lower')
     # Set plot title and labels for the zoomed view
-    axs[2].set_title(largest_slice_index)
-    axs[2].set_xlabel('X')
-    axs[2].set_ylabel('Y')
+    axs[1].set_title(largest_slice_index)
+    axs[1].set_xlabel('X')
+    axs[1].set_ylabel('Y')
 
-    # Create a slider for slice selection
+    def update_slice(val):
+        # Get the current slider value
+        slice_index = int(slice_slider.val)
+
+        # Update the scan slice and zoomed slice
+        scan_slice = np.rot90(scan_data[:, :, slice_index])
+        zoomed_slice = np.rot90(zoomed_scan_resized[:, :, slice_index])
+
+        # Update the image data
+        scan_im.set_data(scan_slice)
+        zoomed_im.set_data(zoomed_slice)
+
+        # Set plot title for the zoomed view
+        axs[1].set_title(largest_slice_index)
+
+        # Redraw the figure
+        fig.canvas.draw()
+
+    # Connect the update_slice function to the slider's on_changed event
     slice_slider_ax = plt.axes([0.2, 0.05, 0.6, 0.03])  # Create slider axis
     slice_slider = Slider(slice_slider_ax, 'Slice', 0, scan_data.shape[2] - 1, valinit=scan_data.shape[2] // 2,
                           valstep=1)
+    slice_slider.on_changed(update_slice)
+
+    # Show the plot
+    plt.show()
 
     def update_slice(val):
         slice_index = int(slice_slider.val)
@@ -281,78 +299,36 @@ def display_seg(folder_path):
     return zoomed_slice
 
 
-def single_input_array(folder_path):
-    files = os.listdir(folder_path)
-    scan_path = None
-    mask_path = None
-
-    # Find scan and mask files
-    for file in files:
-        if 'nii.gz' in file:
-            scan_path = os.path.join(folder_path, file)
-        elif '.nii' in file:
-            mask_path = os.path.join(folder_path, file)
-
-    if scan_path is None or mask_path is None:
-        print('Scan or mask file not found')
-        return
-
-    # Load scan and mask data
-    scan_img = nib.load(scan_path)
-    mask_img = nib.load(mask_path)
-
-    scan_data = scan_img.get_fdata()
-    mask_data = mask_img.get_fdata()
-
-    tumor_coords = mask_data.nonzero()
-    min_x, max_x = min(tumor_coords[1]), max(tumor_coords[1])
-    min_y, max_y = min(tumor_coords[0]), max(tumor_coords[0])
-    tumor_width = max_x - min_x
-    tumor_height = max_y - min_y
-    center_x = (max_x + min_x) // 2
-    center_y = (max_y + min_y) // 2
-
-    # Calculate the zoomed bounding box coordinates
-    zoomed_min_x = max(center_x - tumor_width // 2, 0)
-    zoomed_max_x = min(center_x + tumor_width // 2, scan_data.shape[1] - 1)
-    zoomed_min_y = max(center_y - tumor_height // 2, 0)
-    zoomed_max_y = min(center_y + tumor_height // 2, scan_data.shape[0] - 1)
-
-    # Display the zoomed view where the tumor is the largest
-    output_size = (224, 224)
-    largest_slice_index = np.argmax(np.sum(mask_data, axis=(0, 1)))
-
-    zoomed_scan = scan_data[zoomed_min_y:zoomed_max_y, zoomed_min_x:zoomed_max_x, :]
-    zoomed_scan_resized = ndimage.zoom(zoomed_scan, (output_size[0] / zoomed_scan.shape[0],
-                                                     output_size[1] / zoomed_scan.shape[1],
-                                                     1), order=3)
-    zoomed_slice = zoomed_scan_resized[:, :, largest_slice_index]
-
-    return zoomed_slice
-
-def save_array_to_hdf5(array, filename):
+def resize_image(image, target_size):
     """
-    Save the image with the largest tumor to an hdf5 file
-    :param array:
-    :param filename:
-    :return:
+    Resizes the image while maintaining the aspect ratio.
+    :param image: input image
+    :param target_size: target size (int)
+    :return: resized image
     """
-    with h5py.File(filename, 'w') as f:
-        # Create a group called 'patient'
-        group = f.create_group('Patient')
-        f_array = array.astype(np.float32)
-        # Create a variable named 'train' within the 'patient' group
+    height, width = image.shape[:2]
 
-        min_val = np.min(f_array)
-        max_val = np.max(f_array)
-        scaled_arr = (f_array - min_val) / (max_val - min_val)  # Scale between 0 and 1
-        scaled_arr = 2 * scaled_arr - 1
+    if len(image.shape) == 3:
+        # Color image (3 channels)
+        if height > width:
+            aspect_ratio = float(target_size) / height
+            new_height = target_size
+            new_width = int(width * aspect_ratio)
+        else:
+            aspect_ratio = float(target_size) / width
+            new_height = int(height * aspect_ratio)
+            new_width = target_size
 
-        group['train'] = scaled_arr
+        resized_image = cv2.resize(image, (new_width, new_height))
+    else:
+        # Grayscale image (1 channel)
+        aspect_ratio = float(target_size) / max(height, width)
+        new_height = int(height * aspect_ratio)
+        new_width = int(width * aspect_ratio)
 
-        # Create an empty variable named 'target' (type: long) within the 'patient' group
-        group['target'] = 1
+        resized_image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
 
+    return resized_image
 
 
 def multi_input_array(folder_path):
@@ -364,13 +340,14 @@ def multi_input_array(folder_path):
     files = os.listdir(folder_path)
     scan_path = None
     mask_path = None
+    desired_shape = 224
 
     # Find scan and mask files
     for file in files:
-        if 'nii.gz' in file:
-            scan_path = os.path.join(folder_path, file)
-        elif '.nii' in file:
+        if 'segmentation' in file.lower() or file.endswith('.nii'):
             mask_path = os.path.join(folder_path, file)
+        else:
+            scan_path = os.path.join(folder_path, file)
 
     if scan_path is None or mask_path is None:
         print('Scan or mask file not found')
@@ -383,6 +360,10 @@ def multi_input_array(folder_path):
     scan_data = scan_img.get_fdata()
     mask_data = mask_img.get_fdata()
 
+    # Change the voxel size of the mask to 1x1x1
+    mask_header = mask_img.header.copy()
+    mask_header.set_zooms((1, 1, 1))
+
     # Coordonnées de la tumeur en se servant du masque
     tumor_coords = mask_data.nonzero()
     min_x, max_x = min(tumor_coords[1]), max(tumor_coords[1])
@@ -393,83 +374,147 @@ def multi_input_array(folder_path):
     center_y = (max_y + min_y) // 2
 
     # Calculate the zoomed bounding box coordinates
-    zoomed_min_x = max(center_x - tumor_width // 2, 0)
-    zoomed_max_x = min(center_x + tumor_width // 2, scan_data.shape[1] - 1)
-    zoomed_min_y = max(center_y - tumor_height // 2, 0)
-    zoomed_max_y = min(center_y + tumor_height // 2, scan_data.shape[0] - 1)
+    zoomed_min_x = max(center_x - tumor_width // 2 - 10, 0)
+    zoomed_max_x = min(center_x + tumor_width // 2 + 10, scan_data.shape[1] - 1)
+    zoomed_min_y = max(center_y - tumor_height // 2 - 10, 0)
+    zoomed_max_y = min(center_y + tumor_height // 2 + 10, scan_data.shape[0] - 1)
+
+    # Calculate the required padding to achieve a square shape of 224x224
+    current_width = zoomed_max_x - zoomed_min_x
+    current_height = zoomed_max_y - zoomed_min_y
+
+    if current_width > current_height:
+        diff = current_width - current_height
+        pad_top = diff // 2
+        pad_bottom = diff - pad_top
+        zoomed_min_y = max(zoomed_min_y - pad_top, 0)
+        zoomed_max_y = min(zoomed_max_y + pad_bottom, scan_data.shape[0] - 1)
+    elif current_height > current_width:
+        diff = current_height - current_width
+        pad_left = diff // 2
+        pad_right = diff - pad_left
+        zoomed_min_x = max(zoomed_min_x - pad_left, 0)
+        zoomed_max_x = min(zoomed_max_x + pad_right, scan_data.shape[1] - 1)
 
     zoomed_slices = []
+    zoomed_tumors = []
     tumor_area = []
-    output_size = (224, 224)
 
     for slice_index in range(scan_data.shape[2]):
         if np.any(mask_data[:, :, slice_index]):
             zoomed_slice = scan_data[zoomed_min_y:zoomed_max_y, zoomed_min_x:zoomed_max_x, slice_index]
-            # Apply interpolation if needed
-            zoomed_slice_resized = cv2.resize(zoomed_slice, output_size)
-            zoomed_slices.append(zoomed_slice_resized)
-            tumor_area.append(np.sum(mask_data[:, :, slice_index]))
+            try:
+                zoomed_slice_resized = cv2.resize(zoomed_slice, (desired_shape, desired_shape))
+                zoomed_slice_resized = cv2.rotate(zoomed_slice_resized, cv2.ROTATE_90_CLOCKWISE)
+                zoomed_slice_resized = cv2.flip(zoomed_slice_resized, 1)
+                zoomed_slices.append(zoomed_slice_resized)
+                tumor_area.append(np.sum(mask_data[:, :, slice_index]))
+            except cv2.error as e:
+                print(f"Error occurred during resizing: {e}. Skipping patient.")
+                continue
+
+    zoomed_slices = zoomed_slices[::-1]  # reversing using list slicing
 
     # Extract patient ID from scan file name
     file_name = os.path.basename(scan_path)
     patient_id = file_name[:9]  # Extract the first 9 characters
-    print(patient_id)
+    print('Patient ID:', patient_id)
+
+    # # Display zoomed slices
+    # num_slices = len(zoomed_slices)
+    # num_cols = 5  # Number of columns in the plot
+    # num_rows = (num_slices + num_cols - 1) // num_cols  # Calculate number of rows
+    #
+    # plt.figure(figsize=(15, 3 * num_rows))  # Set figure size
+    #
+    # for i, slice_img in enumerate(zoomed_slices):
+    #     plt.subplot(num_rows, num_cols, i + 1)
+    #     plt.imshow(slice_img, cmap='gray')
+    #     plt.axis('off')
+    #
+    # plt.tight_layout()
+    # plt.show()
+
     return zoomed_slices, patient_id, tumor_area
 
 
 
-from sklearn import preprocessing
 
 
 def save_arrays_to_hdf5(array, patient_id, tumor_area):
     """
-    Save all the tumor images in an HDF5 file.
+    Save all the tumor images in an HDF5 file and plot histograms.
     :param array: List or array of tumor images (output of multi_input_array)
     :param tumor_area: List or array of tumor areas corresponding to each slice
     :param patient_id: Patient ID
     :return: None
     """
-    save_location = '/home/adamdiakite/Documents/ESPS-main/Test'
+    save_location = '/home/adamdiakite/Documents/ESPS-main/HDF5_Test'
 
-    folder_path = os.path.join(save_location, 'patient_data')
+    folder_path = os.path.join(save_location, 'patient_data_uniform')
     os.makedirs(folder_path, exist_ok=True)  # Creates the patient_data folder if it doesn't exist
 
     filename = os.path.join(folder_path, f'{patient_id}.hdf5')
-
-    if os.path.exists(filename):
-        print(f"HDF5 file for patient {patient_id} already exists. Skipping processing.")
-        return
 
     try:
         with h5py.File(filename, 'w') as f:
             # Create a dataset for the patient ID
 
             for i, element in enumerate(array):
-                slice_group = f.create_group(f'slice_{i}')
+                try:
+                    slice_group = f.create_group(f'slice_{i}')
 
-                # image scan
-                f_array = array[i].astype(np.float32)
+                    # Rotate the image clockwise
+                    rotated_image = cv2.rotate(array[i], cv2.ROTATE_90_CLOCKWISE)
 
-                min_max_scaler = preprocessing.MinMaxScaler(feature_range=(-1.0, 1.0), copy=False)
-                scaled_arr = min_max_scaler.fit_transform(f_array)
+                    # Image scan
+                    f_array = rotated_image.astype(np.float32)
 
-                # group creation in hdf5
-                slice_group.create_dataset('train', data=scaled_arr, track_order=True)
-                slice_group.create_dataset('target', shape=(), dtype='int64', data=1)
+                    # Set values greater than 700 to 700
+                    f_array[f_array > 700] = 700
 
-                # Get tumor area from the provided tumor_area parameter
-                tumor_area_value = tumor_area[i]
-                slice_group.create_dataset('tumor_area', shape=(), dtype='int64', data=tumor_area_value)
+                    min_max_scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1), copy=False)
+                    ascolumns = f_array.reshape(-1, 1)
+                    t = min_max_scaler.fit_transform(ascolumns)
+                    scaled_arr = t.reshape(f_array.shape)
+
+                    # Randomize the indices of the flattened array
+                    flattened_indices = np.arange(scaled_arr.size)
+                    np.random.shuffle(flattened_indices)
+
+                    # Reshape the randomized indices to match the array shape
+                    randomized_indices = np.unravel_index(flattened_indices, scaled_arr.shape)
+
+                    # Create a new array with randomized indices
+                    randomized_arr = np.zeros_like(scaled_arr)
+                    randomized_arr[randomized_indices] = scaled_arr.flatten()
+
+                    # Group creation in HDF5
+                    slice_group.create_dataset('train', data=randomized_arr, track_order=True)
+                    slice_group.create_dataset('target', shape=(), dtype='int64', data=1)
+
+                    # Get tumor area from the provided tumor_area parameter
+                    tumor_area_value = tumor_area[i]
+                    slice_group.create_dataset('tumor_area', shape=(), dtype='int64', data=tumor_area_value)
+
+                    if i == 28 or i == 32:
+                        plt.hist(randomized_arr.flatten(), bins=50, alpha=0.5, label=f'Slice {i}')
+                except IndexError as e:
+                    print(f"IndexError encountered while processing slice {i}: {e}")
+                    print("Skipping to the next slice.")
+                    continue
+
+        # Plot the histograms
+        plt.xlabel('Pixel Value')
+        plt.ylabel('Frequency')
+        plt.title('Histogram of Pixel Values')
+        plt.legend()
+        plt.show()
 
         print("Arrays saved to HDF5 file.")
     except EOFError as e:
         print(f"Error encountered while saving HDF5 file: {e}")
         print("Skipping to the next file.")
-
-
-
-
-
 
 def process_scan_folder(root_folder):
     """
@@ -488,5 +533,6 @@ def process_scan_folder(root_folder):
                     save_arrays_to_hdf5(array, patient_id, tumor_area)
 
 
-root_folder = '/media/adamdiakite/LaCie/database_paris'
-process_scan_folder(root_folder)
+process_scan_folder('/media/adamdiakite/LaCie/patient49')
+
+# display_seg("/media/adamdiakite/LaCie/database_paris/2-21-0059-2-21-0059/20081229-THO ABDOPELV CR STD/3-TAP Portal/scans")
