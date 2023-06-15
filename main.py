@@ -121,9 +121,6 @@ def train(args):
     torch.cuda.empty_cache()
 
 
-
-import matplotlib.pyplot as plt
-
 def test(input_dir_test, batch_size, model=None):
     model = torch.load('/home/adamdiakite/Documents/ESPS-main/weights/best_pt_OA.pt', map_location='cuda')[
         'model'].float().eval()
@@ -143,12 +140,12 @@ def test(input_dir_test, batch_size, model=None):
     data = []
 
     with torch.no_grad():
-        for images, target, name, tumor in tqdm.tqdm(val_loader, ('%10s') % ('acc@1')):
+        for images, target, name, tumor in tqdm.tqdm(val_loader, ('%10s') % ('acc@1')):  # tumor
             acc1, preds = batch(images, target, model, name)
             torch.cuda.synchronize()
             top1.update(acc1[0].item(), images.size(0))
 
-            data.append((str(name), acc1[0].item(), preds, target, tumor))
+            data.append((str(name), acc1[0].item(), preds, target, tumor))  # tumor
             print(name, "prediction score = ", preds)
 
     # Sort the data based on names
@@ -157,19 +154,19 @@ def test(input_dir_test, batch_size, model=None):
     # Extract sorted names, accuracies, and tumor areas
     sorted_names = [item[0] for item in sorted_data]
     sorted_accuracy = [item[2] for item in sorted_data]
-    sorted_areas = [item[4] for item in sorted_data]
+    # sorted_areas = [item[4] for item in sorted_data]
 
     indices = range(len(sorted_names))
     # find index of max score slice
     max_accuracy = max(sorted_accuracy)
     max_accuracy_index = sorted_accuracy.index(max_accuracy)
     # find the volume of the max score slice
-    max_surface = max(sorted_areas)
-    max_surface_index = sorted_areas.index(max_surface)
+    # max_surface = max(sorted_areas)
+    # max_surface_index = sorted_areas.index(max_surface)
 
     # find index of average accuracy
     average_accuracy = sum(sorted_accuracy) / len(sorted_accuracy)
-    average_surface = sum(sorted_areas) / len(sorted_areas)
+    # average_surface = sum(sorted_areas) / len(sorted_areas)
 
     # Print patient ID
     patient_id = input_dir_test[-14:-5]
@@ -178,8 +175,8 @@ def test(input_dir_test, batch_size, model=None):
     # converting into floats to fit dataframe
     max_accuracy = float(max_accuracy)
     average_accuracy = float(average_accuracy)
-    max_surface = float(max_surface)
-    average_surface = float(average_surface)
+    # max_surface = float(max_surface)
+    # average_surface = float(average_surface)
     preds = [float(x) for x in sorted_accuracy]
 
     dataframe = load_csv_as_dataframe('/home/adamdiakite/Téléchargements/expo_tki.csv')
@@ -193,8 +190,8 @@ def test(input_dir_test, batch_size, model=None):
     # Update the dataframe with values based on patient ID
     dataframe.loc[dataframe['ID'] == patient_id, 'max score'] = max_accuracy
     dataframe.loc[dataframe['ID'] == patient_id, 'average score'] = average_accuracy
-    dataframe.loc[dataframe['ID'] == patient_id, 'max surface'] = max_surface
-    dataframe.loc[dataframe['ID'] == patient_id, 'average surface'] = average_surface
+    # dataframe.loc[dataframe['ID'] == patient_id, 'max surface'] = max_surface
+    # dataframe.loc[dataframe['ID'] == patient_id, 'average surface'] = average_surface
 
     # Plotting accuracy and tumor area for each slice against the slice name
     fig, ax1 = plt.subplots(figsize=(10, 6))
@@ -207,9 +204,9 @@ def test(input_dir_test, batch_size, model=None):
     ax1.set_title('Accuracy and Tumor Area for each Slice')
     ax1.tick_params(axis='x', rotation=90)
 
-    # Plot tumor areas
-    ax2.plot(sorted_names, sorted_areas, 'o-', color='red')
-    ax2.set_ylabel('Tumor Area')
+    # # Plot tumor areas
+    # ax2.plot(sorted_names, sorted_areas, 'o-', color='red')
+    # ax2.set_ylabel('Tumor Area')
 
     # Adjust the spacing between subplots
     fig.tight_layout()
@@ -223,6 +220,329 @@ def test(input_dir_test, batch_size, model=None):
 
     return acc1
 
+
+def test_open_data(input_dir_test, batch_size, model=None):
+    model = torch.load('/home/adamdiakite/Documents/ESPS-main/weights/best_pt_OA.pt', map_location='cuda')[
+        'model'].float().eval()
+
+    Testdataset = H5Dataset(input_dir_test, False)
+    val_loader = torch.utils.data.DataLoader(
+        Testdataset,
+        batch_size=batch_size,
+        num_workers=4,
+        shuffle=False,
+        pin_memory=True,
+        drop_last=True,
+    )
+
+    top1 = util.AverageMeter()
+
+    data = []
+    accuracy_means = []  # List to store the mean accuracy for each plot
+
+    with torch.no_grad():
+        for images, target, name in tqdm.tqdm(val_loader, ('%10s') % ('acc@1')):
+            acc1, preds = batch(images, target, model, name)
+            torch.cuda.synchronize()
+            top1.update(acc1[0].item(), images.size(0))
+
+            data.append((str(name), acc1[0].item(), preds, target, images))
+            print(name, "prediction score =", preds)
+
+    # Sort the data based on names
+    sorted_data = sorted(data, key=lambda x: natural_sort_key(x[0]))
+
+    # Group the data based on the first three characters of the names
+    grouped_data = {}
+    for item in sorted_data:
+        name = item[0]
+        group_key = name[:5]  # First three characters of the name
+        if group_key not in grouped_data:
+            grouped_data[group_key] = []
+        grouped_data[group_key].append(item)
+
+    # Plot the scores for each group separately
+    for group_key, group_data in grouped_data.items():
+        # Extract sorted names, accuracies, and targets for the current group
+        sorted_names = [item[0] for item in group_data]
+        sorted_accuracy = [item[2] for item in group_data]
+        sorted_target = [item[3] for item in group_data]
+        sorted_images = [item[4] for item in group_data]
+
+        # Calculate the mean accuracy for the current group
+        mean_accuracy = np.mean(np.array([acc.item() for acc in sorted_accuracy]))
+
+        accuracy_means.append(mean_accuracy)
+
+        # Print the contents of group_data
+        print(f"Group Key: {group_key}")
+        for item in group_data:
+            print(f"Name: {item[0]}, Accuracy: {item[1]}, Predictions: {item[2]}, Target: {item[3]}")
+
+        # Plot the scores for the current group
+        fig, ax1 = plt.subplots(figsize=(10, 6))
+        ax2 = ax1.twinx()
+
+        # Plot prediction scores
+        ax1.plot(sorted_names, sorted_accuracy, 'o-', color='blue')
+        ax1.set_xlabel('Slice Name')
+        ax1.set_ylabel('Accuracy')
+        ax1.set_ylim(0, 1)
+        ax1.tick_params(axis='x', rotation=90)
+
+        # Plot scaled targets without lines
+        ax2.plot(sorted_names, sorted_target, 'o', color='red')
+        ax2.set_ylabel('Target class')
+        ax2.set_ylim(0, 1)  # Set the y-axis limits to 0 and 1
+
+        # Title with mean accuracy
+        ax1.set_title(f'Prediction for Patient {group_key[2:]} Slices\nMean prediction score: {mean_accuracy}')
+
+        # Adjust the spacing between subplots
+        fig.tight_layout()
+
+        plt.show()
+
+    # Print the mean accuracy for each plot
+    print("Mean Accuracy for Each Plot:")
+    for i, mean_accuracy in enumerate(accuracy_means):
+        print(f"Plot {i + 1}: {mean_accuracy}")
+
+    return top1
+
+
+
+def test_open_data_resized(input_dir_test, batch_size, model=None, save_dir='/home/adamdiakite/Bureau/cropped'):
+    model = torch.load('/home/adamdiakite/Documents/ESPS-main/weights/best_pt_OA.pt', map_location='cuda')[
+        'model'].float().eval()
+
+    Testdataset = H5Dataset(input_dir_test, False)
+    val_loader = torch.utils.data.DataLoader(
+        Testdataset,
+        batch_size=batch_size,
+        num_workers=4,
+        shuffle=False,
+        pin_memory=True,
+        drop_last=True,
+    )
+
+    top1 = util.AverageMeter()
+
+    data = []
+    accuracy_means = []  # List to store the mean accuracy for each plot (original images)
+
+    with torch.no_grad():
+        for images, target, name in tqdm.tqdm(val_loader, ('%10s') % ('acc@1')):
+
+            #Cropp + resize
+            cropped_resized_images = []
+            for image in images:
+                # Crop 24 pixels from top, bottom, right, and left
+                cropped_image = image[:, None, 24:-24, 24:-24]  # Crop the image
+
+                # Calculate the crop size reduction
+                crop_reduction = 148
+
+                # Resize the cropped image to the original shape
+                resized_image = torch.nn.functional.interpolate(cropped_image, size=(224, 224), mode='bilinear',
+                                                                align_corners=False)
+
+                # Apply zooming by cropping the central region
+                zoomed_image = resized_image[:, :, crop_reduction:-crop_reduction, crop_reduction:-crop_reduction]
+
+                cropped_resized_images.append(zoomed_image)
+
+            # Original Images
+            acc1_original, preds_original = batch(images, target, model, name)
+            acc1_cropped, preds_cropped_resized = batch(images, target, model, name)
+            torch.cuda.synchronize()
+            top1.update(acc1_cropped[0].item(), images.size(0))
+
+            data.append((str(name), acc1_original[0].item(), preds_original, acc1_cropped, preds_cropped_resized, target))
+            print(name, "original prediction score =", preds_original, "cropped + resized prediction score =", preds_cropped_resized)
+
+    sorted_data = sorted(data, key = lambda x: natural_sort_key(x[0]))
+
+
+    # Group the data based on the first three characters of the names (original images)
+    grouped_data = {}
+    for item in sorted_data:
+        name = item[0]
+        group_key = name[:5]  # First three characters of the name
+        if group_key not in grouped_data:
+            grouped_data[group_key] = []
+        grouped_data[group_key].append(item)
+
+
+    # Plot the scores for each group separately (original images)
+    for group_key, group_data in grouped_data.items():
+        # Extract sorted names, accuracies, and targets for the current group
+        sorted_names = [item[0] for item in group_data]
+        sorted_accuracy_original = [item[2] for item in group_data]
+        sorted_accuracy_cropped = [item[4] for item in group_data]
+        sorted_target = [item[5] for item in group_data]
+
+        # Calculate the mean accuracy for the current group
+        mean_accuracy_original = np.mean([acc.item() for acc in sorted_accuracy_original])
+        mean_accuracy_cropped = np.mean([acc.item() for acc in sorted_accuracy_cropped])
+
+        accuracy_means.append(mean_accuracy_cropped)
+
+        # Print the contents of group_data
+        print(f"Group Key: {group_key}")
+        for item in group_data:
+            print(f"Name: {item[0]}, Original Predictions: {item[2]}, Cropped Predictions: {item[4]}")
+
+        # Plot the scores for the current group
+        fig, ax1 = plt.subplots(figsize=(10, 6))
+        ax2 = ax1.twinx()
+
+        # Plot original prediction scores
+        ax1.plot(sorted_names, sorted_accuracy_original, 'o-', color='green')
+        ax1.set_xlabel('Slice Name')
+        ax1.set_ylabel('Prediction (Original)', color='green')
+        ax1.tick_params(axis='y', colors='green')
+        ax1.set_ylim(0, 1)
+        ax1.tick_params(axis='x', rotation=90)
+
+        # Plot cropped prediction scores
+        ax2.plot(sorted_names, sorted_accuracy_cropped, 'o-', color='red')
+        ax2.set_ylabel('Prediction (Cropped)', color='red')
+        ax2.tick_params(axis='y', colors='red')
+        ax2.set_ylim(0, 1)
+
+        # Title with mean accuracy and target class
+        mean_target = np.mean(sorted_target)
+        main_title = f'Prediction for Patient {group_key[2:]} Slices | Target Class: {mean_target:.2f}'
+        mean_acc_title = f'Mean Original prediction: {mean_accuracy_original:.2f} | Mean Cropped prediction: {mean_accuracy_cropped:.2f}'
+
+        ax1.set_title(f'{main_title}\n{mean_acc_title}', color='black', fontsize=12, fontweight='bold')
+
+        # Adjust the spacing between subplots
+        fig.tight_layout()
+
+        # Save the plot at the specified location
+        if save_dir is not None:
+            save_path = os.path.join(save_dir, f'group_{group_key}.png')
+            plt.savefig(save_path)
+            plt.close(fig)
+        else:
+            plt.show()
+
+    # Print the mean accuracy for each plot
+    print("Mean Accuracy for Each Plot:")
+    for i, mean_accuracy in enumerate(accuracy_means):
+        print(f"Plot {i + 1}: {mean_accuracy}")
+
+    return top1
+
+def test_open_data_inverted(input_dir_test, batch_size, model=None, save_dir='/home/adamdiakite/Bureau/inverted'):
+    model = torch.load('/home/adamdiakite/Documents/ESPS-main/weights/best_pt_OA.pt', map_location='cuda')[
+        'model'].float().eval()
+
+    Testdataset = H5Dataset(input_dir_test, False)
+    val_loader = torch.utils.data.DataLoader(
+        Testdataset,
+        batch_size=batch_size,
+        num_workers=4,
+        shuffle=False,
+        pin_memory=True,
+        drop_last=True,
+    )
+
+    top1 = util.AverageMeter()
+
+    data = []
+    accuracy_means = []  # List to store the mean accuracy for each plot
+
+    with torch.no_grad():
+        for images, target, name in tqdm.tqdm(val_loader, ('%10s') % ('acc@1')):
+            # Invert the sign of the images
+            inverted_images = -images
+
+            acc1_original, preds_original = batch(images, target, model, name)
+            acc1_inverted, preds_inverted = batch(inverted_images, target, model, name)
+
+            torch.cuda.synchronize()
+            top1.update(acc1_inverted[0].item(), images.size(0))
+
+            data.append(
+                (str(name), acc1_original[0].item(), preds_original, acc1_inverted[0].item(), preds_inverted, target))
+            print(name, "original prediction score =", preds_original, "inverted prediction score =", preds_inverted)
+
+    # Sort the data based on names
+    sorted_data = sorted(data, key=lambda x: natural_sort_key(x[0]))
+
+    # Group the data based on the first three characters of the names
+    grouped_data = {}
+    for item in sorted_data:
+        name = item[0]
+        group_key = name[:5]  # First three characters of the name
+        if group_key not in grouped_data:
+            grouped_data[group_key] = []
+        grouped_data[group_key].append(item)
+
+    # Plot the scores for each group separately
+    for group_key, group_data in grouped_data.items():
+        # Extract sorted names, accuracies, and targets for the current group
+        sorted_names = [item[0] for item in group_data]
+        sorted_accuracy_original = [item[2] for item in group_data]
+        sorted_accuracy_inverted = [item[4] for item in group_data]
+        sorted_target = [item[5] for item in group_data]
+
+        # Calculate the mean accuracy for the current group
+        mean_accuracy_original = np.mean([acc.item() for acc in sorted_accuracy_original])
+        mean_accuracy_inverted = np.mean([acc.item() for acc in sorted_accuracy_inverted])
+
+        accuracy_means.append(mean_accuracy_inverted)
+
+        # Print the contents of group_data
+        print(f"Group Key: {group_key}")
+        for item in group_data:
+            print(f"Name: {item[0]}, Original Predictions: {item[2]}, Inverted Predictions: {item[4]}")
+
+        # Plot the scores for the current group
+        fig, ax1 = plt.subplots(figsize=(10, 6))
+        ax2 = ax1.twinx()
+
+        # Plot original prediction scores
+        ax1.plot(sorted_names, sorted_accuracy_original, 'o-', color='green')
+        ax1.set_xlabel('Slice Name')
+        ax1.set_ylabel('Prediction (Original)', color='green')
+        ax1.tick_params(axis='y', colors='green')
+        ax1.set_ylim(0, 1)
+        ax1.tick_params(axis='x', rotation=90)
+
+        # Plot inverted prediction scores
+        ax2.plot(sorted_names, sorted_accuracy_inverted, 'o-', color='red')
+        ax2.set_ylabel('Prediction (Inverted)', color='red')
+        ax2.tick_params(axis='y', colors='red')
+        ax2.set_ylim(0, 1)
+
+        # Title with mean accuracy and target class
+        mean_target = np.mean(sorted_target)
+        main_title = f'Prediction for Patient {group_key[2:]} Slices | Target Class: {mean_target:.2f}'
+        mean_acc_title = f'Mean Original prediction: {mean_accuracy_original:.2f} | Mean Inverted prediction: {mean_accuracy_inverted:.2f}'
+
+        ax1.set_title(f'{main_title}\n{mean_acc_title}', color='black', fontsize=12, fontweight='bold')
+
+        # Adjust the spacing between subplots
+        fig.tight_layout()
+
+        # Save the plot at the specified location
+        if save_dir is not None:
+            save_path = os.path.join(save_dir, f'group_{group_key}.png')
+            plt.savefig(save_path)
+            plt.close(fig)
+        else:
+            plt.show()
+
+    # Print the mean accuracy for each plot
+    print("Mean Accuracy for Each Plot:")
+    for i, mean_accuracy in enumerate(accuracy_means):
+        print(f"Plot {i + 1}: {mean_accuracy}")
+
+    return top1
 
 
 def test1(input_dir_test, batch_size, model=None, dataframe=None):
@@ -244,12 +564,13 @@ def test1(input_dir_test, batch_size, model=None, dataframe=None):
     data = []
 
     with torch.no_grad():
-        for images, target, name, tumor in tqdm.tqdm(val_loader, ('%10s') % ('acc@1')):
+        for images, target, name, tumor in tqdm.tqdm(val_loader,
+                                                     ('%10s') % ('acc@1')):  # add tumour when i go back to my data
             acc1, preds = batch(images, target, model, name)
             torch.cuda.synchronize()
             top1.update(acc1[0].item(), images.size(0))
 
-            data.append((str(name), acc1[0].item(), preds, target, tumor))
+            data.append((str(name), acc1[0].item(), preds, target, tumor))  # here as well
             print(name, preds, acc1, target)
 
     # Sort the data based on names
@@ -305,7 +626,6 @@ def test1(input_dir_test, batch_size, model=None, dataframe=None):
     return dataframe
 
 
-
 def load_csv_as_array(file_path):
     data = []
     with open(file_path, 'r') as file:
@@ -348,7 +668,6 @@ def benchmark(args):
     util.print_benchmark(shape)
 
 
-
 def apply_test_recursive(folder_path, batch_size):
     # Iterate over all files and directories in the folder
     for root, dirs, files in os.walk(folder_path):
@@ -356,9 +675,6 @@ def apply_test_recursive(folder_path, batch_size):
             if file.endswith(".h5") or file.endswith(".hdf5"):
                 file_path = os.path.join(root, file)
                 test(file_path, batch_size)
-
-
-
 
 
 def main():
@@ -394,44 +710,41 @@ def main():
     if args.benchmark:
         benchmark(args)
 
-
     batch_size = 1
-    #apply_test_recursive("/home/adamdiakite/Documents/ESPS-main/HDF5_Test/patient_data", batch_size)
-
-
-
-    input_dir = '/home/adamdiakite/Documents/ESPS-main/HDF5_Test/patient_data_uniform'  # Directory path containing HDF5 files
-    batch_size = 1
-    output_file = '/home/adamdiakite/Documents/ESPS-main/HDF5_Test/predictions_uniform.csv'
-
-
-    # Initialize an empty dataframe
-    final_dataframe = pd.DataFrame(columns=['ID', 'max score', 'average score', 'max surface', 'average surface'])
-
-    # Iterate over the files in the directory
-    for filename in os.listdir(input_dir):
-        if filename.endswith(".hdf5"):
-            file_path = os.path.join(input_dir, filename)
-            patient_id = filename[:-5]  # Extract patient ID from the file name
-
-            # Create a new row in the dataframe for the patient
-            patient_row = {'ID': patient_id}
-            final_dataframe = final_dataframe.append(patient_row, ignore_index=True)
-
-            # Call the test function for each file and update the dataframe
-            final_dataframe = test1(file_path, batch_size, dataframe=final_dataframe)
-
-    # Save the final dataframe as a CSV file
-
-    csv_file = '/home/adamdiakite/Documents/ESPS-main/Test/expo_tki.csv'
-    tki_data = pd.read_csv(csv_file)
-
-    merged_dataframe = pd.merge(final_dataframe, tki_data, on='ID', how='left')
-    # Save the merged dataframe as a CSV file
-    merged_dataframe.to_csv(output_file, index=False)
-    print("Merged dataframe saved at", output_file)
-
-
+    # apply_test_recursive('/home/adamdiakite/Documents/ESPS-main/Test/Open_Access_Data.hdf5', batch_size)
+    #test_open_data('/home/adamdiakite/Documents/ESPS-main/Test/Open_Access_Data.hdf5', batch_size)
+    # test_open_data_inverted('/home/adamdiakite/Documents/ESPS-main/Test/Open_Access_Data.hdf5', batch_size)
+    test_open_data_resized('/home/adamdiakite/Documents/ESPS-main/Test/Open_Access_Data.hdf5', batch_size)
+    # input_dir = '/home/adamdiakite/Documents/ESPS-main/HDF5_Test/patient_data_inverted'  # Directory path containing HDF5 files
+    # batch_size = 1
+    # output_file = '/home/adamdiakite/Documents/ESPS-main/HDF5_Test/patient_data_inverted.csv.csv'
+    #
+    #
+    # # Initialize an empty dataframe
+    # final_dataframe = pd.DataFrame(columns=['ID', 'max score', 'average score', 'max surface', 'average surface'])
+    #
+    # # Iterate over the files in the directory
+    # for filename in os.listdir(input_dir):
+    #     if filename.endswith(".hdf5"):
+    #         file_path = os.path.join(input_dir, filename)
+    #         patient_id = filename[:-5]  # Extract patient ID from the file name
+    #
+    #         # Create a new row in the dataframe for the patient
+    #         patient_row = {'ID': patient_id}
+    #         final_dataframe = final_dataframe.append(patient_row, ignore_index=True)
+    #
+    #         # Call the test function for each file and update the dataframe
+    #         final_dataframe = test1(file_path, batch_size, dataframe=final_dataframe)
+    #
+    # # Save the final dataframe as a CSV file
+    #
+    # csv_file = '/home/adamdiakite/Documents/ESPS-main/Test/expo_tki.csv'
+    # tki_data = pd.read_csv(csv_file)
+    #
+    # merged_dataframe = pd.merge(final_dataframe, tki_data, on='ID', how='left')
+    # # Save the merged dataframe as a CSV file
+    # merged_dataframe.to_csv(output_file, index=False)
+    # print("Merged dataframe saved at", output_file)
 
     if args.test:
         test(args)

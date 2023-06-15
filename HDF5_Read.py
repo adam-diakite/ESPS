@@ -31,21 +31,26 @@ class H5Dataset(Dataset):
             keys = list(record.keys())
             group_name = keys[index]
             train_data = np.array(record[group_name]['train']).astype(np.float32)
+            train_data = np.expand_dims(train_data, axis=-1)
+            train_data = np.concatenate((train_data, train_data, train_data), axis=-1)
 
             if self.train:
-                train_data1 = np.expand_dims(train_data, axis=-1)
-                train_data2 = np.concatenate((train_data1, train_data1, train_data1), axis=-1)
-                train_data3 = transformations['train'](train_data2)
+                train_data = transformations['train'](train_data)
             else:
-                train_data1 = np.expand_dims(train_data, axis=-1)
-                train_data2 = np.concatenate((train_data1, train_data1, train_data1), axis=-1)
-                train_data3 = transformations['val'](train_data2)
+                train_data = transformations['val'](train_data)
 
-            target_data = torch.randint(2, (1, 1))
+            target_data = np.array(record[group_name]['target']).astype(np.long)
 
-            tumor_area = record[group_name]['tumor_area'][()]
+            #tumor_area = record[group_name]['tumor_area'][()]
 
-            return train_data3, target_data, group_name, tumor_area
+            return train_data, target_data, group_name #tumor_area
+
+    def __len__(self):
+        with h5py.File(self.h5_path, 'r') as record:
+            return len(record)
+
+
+# tumor_area = record[group_name]['tumor_area'][()]
 
     def __len__(self):
         with h5py.File(self.h5_path, 'r') as record:

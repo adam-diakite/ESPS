@@ -8,7 +8,12 @@ preds = pd.read_csv('/home/adamdiakite/Documents/ESPS-main/HDF5_Test/predictions
 preds_no_tresh = pd.read_csv('/home/adamdiakite/Documents/ESPS-main/HDF5_Test/predictions_no_tresh.csv')
 preds_strides = pd.read_csv('/home/adamdiakite/Documents/ESPS-main/HDF5_Test/predictions_strides.csv')
 preds_uniform = pd.read_csv('/home/adamdiakite/Documents/ESPS-main/HDF5_Test/predictions_uniform.csv')
-
+preds_only_tumor = pd.read_csv('/home/adamdiakite/Documents/ESPS-main/HDF5_Test/predictions_only_tumors.csv')
+preds_only_surroundings = pd.read_csv(
+    '/home/adamdiakite/Documents/ESPS-main/HDF5_Test/predictions_only_surroundings.csv')
+preds_only_surroundings_test = pd.read_csv('/home/adamdiakite/Documents/ESPS-main/HDF5_Test/predictions_only_surroundings_test.csv')
+preds_only_tumors_test = pd.read_csv('/home/adamdiakite/Documents/ESPS-main/HDF5_Test/predictions_only_tumors_test.csv')
+preds_inverted = pd.read_csv('/home/adamdiakite/Documents/ESPS-main/HDF5_Test/patient_data_inverted.csv')
 
 def plot_score_distribution():
     """
@@ -237,9 +242,134 @@ def plot_scores_surfaces(preds, patient_id):
     # Show the plot
     plt.show()
 
+def plot_scores_surfaces_three(preds1, preds2, preds3, patient_id):
+    """
+    Slice score vs slice surface for a specified patient in parameters.
+    :param preds1: Predictions 1
+    :param preds2: Predictions 2
+    :param preds3: Predictions 3
+    :param patient_id: Patient ID
+    """
+    # Select the columns for slice scores and surfaces
+    slice_score_columns = [col for col in preds1.columns if col.startswith('Slice') and not col.endswith('_surface')]
+    slice_surface_columns = [col for col in preds1.columns if col.startswith('Slice') and col.endswith('_surface')]
+
+    # Find the row for the specified patient ID
+    patient_data1 = preds1[preds1['ID'] == patient_id].iloc[0]
+    patient_data2 = preds2[preds2['ID'] == patient_id].iloc[0]
+    patient_data3 = preds3[preds3['ID'] == patient_id].iloc[0]
+
+    # Get the slice numbers
+    slice_numbers = [col.split(' ')[1] for col in slice_score_columns]
+
+    # Get the slice scores and surfaces for the patient
+    slice_scores1 = [patient_data1[col] for col in slice_score_columns]
+    slice_scores2 = [patient_data2[col] for col in slice_score_columns]
+    slice_scores3 = [patient_data3[col] for col in slice_score_columns]
+
+    # Get the slice surfaces for the patient
+    slice_surfaces = [patient_data1[col] for col in slice_surface_columns]
+
+    # Calculate the total tumor volume
+    total_volume = np.nansum(slice_surfaces)
+
+    # Create the figure and axes
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+
+    # Plot the slice scores
+    ax1.plot(slice_numbers, slice_scores1, 'bo-', label='Slices complètes')
+    ax1.plot(slice_numbers, slice_scores2, 'go-', label='Seulement tumeur')
+    ax1.plot(slice_numbers, slice_scores3, 'ro-', label='Sans tumeur')
+    ax1.set_xlabel('Slice Number')
+    ax1.set_ylabel('Slice Score')
+    ax1.set_ylim(0, 1)  # Set the y-axis limits to 0 and 1 for slice scores
+    ax1.tick_params(axis='y')
+
+    # Create a twin axes for slice surfaces
+    ax2 = ax1.twinx()
+
+    # Plot the slice surfaces
+    ax2.plot(slice_numbers, slice_surfaces, 'ko-', label='Slice Surface')
+    ax2.set_ylabel('Slice Surface')
+    ax2.tick_params(axis='y')
+
+    # Add legend for total tumor volume
+    handles1, labels1 = ax1.get_legend_handles_labels()
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    plt.legend(handles1 + handles2, labels1 + labels2, loc='upper right')
+
+    # Set title with total tumor volume in green
+    plt.title(f'Slice Scores and Surfaces for Patient {patient_id}\nTotal Tumor Volume: {total_volume}', color='green')
+
+    # Rotate x-axis labels if needed
+    plt.xticks(rotation=90)
+
+    # Show the plot
+    plt.show()
+
+def plot_score_surface_two(preds1, preds2, patient_id):
+    """
+    Slice score vs slice surface for a specified patient in parameters.
+    :param preds1: Predictions 1
+    :param preds2: Predictions 2
+    :param patient_id: Patient ID
+    """
+    # Select the columns for slice scores and surfaces
+    slice_score_columns = [col for col in preds1.columns if col.startswith('Slice') and not col.endswith('_surface')]
+    slice_surface_columns = [col for col in preds1.columns if col.startswith('Slice') and col.endswith('_surface')]
+
+    # Find the row for the specified patient ID
+    patient_data1 = preds1[preds1['ID'] == patient_id].iloc[0]
+    patient_data2 = preds2[preds2['ID'] == patient_id].iloc[0]
+
+    # Get the slice numbers
+    slice_numbers = [col.split(' ')[1] for col in slice_score_columns]
+
+    # Get the slice scores and surfaces for the patient
+    slice_scores1 = [patient_data1[col] for col in slice_score_columns]
+    slice_scores2 = [patient_data2[col] for col in slice_score_columns]
+
+    # Get the slice surfaces for the patient
+    slice_surfaces = [patient_data1[col] for col in slice_surface_columns]
+
+    # Calculate the total tumor volume
+    total_volume = np.nansum(slice_surfaces)
+
+    # Create the figure and axes
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+
+    # Plot the slice scores
+    ax1.plot(slice_numbers, slice_scores1, 'bo-', label='Avant inversion')
+    ax1.plot(slice_numbers, slice_scores2, 'go-', label='Après inversion')
+    ax1.set_xlabel('Slice Number')
+    ax1.set_ylabel('Slice Score')
+    ax1.set_ylim(0, 1)  # Set the y-axis limits to 0 and 1 for slice scores
+    ax1.tick_params(axis='y')
+
+    # Create a twin axes for slice surfaces
+    ax2 = ax1.twinx()
+
+    # Plot the slice surfaces
+    ax2.plot(slice_numbers, slice_surfaces, 'ko-', label='Slice Surface')
+    ax2.set_ylabel('Slice Surface')
+    ax2.tick_params(axis='y')
+
+    # Add legend for total tumor volume
+    handles1, labels1 = ax1.get_legend_handles_labels()
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    plt.legend(handles1 + handles2, labels1 + labels2, loc='upper right')
+
+    # Set title with total tumor volume in green
+    plt.title(f'Slice Scores and Surfaces for Patient  {patient_id}\nTotal Tumor Volume: {total_volume}', color='green')
+
+    # Rotate x-axis labels if needed
+    plt.xticks(rotation=90)
+
+    # Show the plot
+    plt.show()
 
 
-def various_plots(data):
+def max_score_duree(data):
     """
     Scatter plot of 'max surface' versus 'duree_tki' for all patients in the CSV.
     :param data: DataFrame containing the data
@@ -250,12 +380,217 @@ def various_plots(data):
 
     # Create the scatter plot
     plt.scatter(duree_tki, max_surface)
-    plt.xlabel('Tumor volume')
+    plt.xlabel('Durée TKI')
     plt.ylabel('max prediction score')
-    plt.title('max prediction score on all slices vs tumor volume for all patients')
+    plt.title('max prediction score on all slices vs TKI for all patients')
+
+    plt.ylim(0, 1)
 
     # Show the plot
     plt.show()
+
+
+def min_score_duree(data):
+    """
+    Scatter plot of 'max surface' versus 'duree_tki' for all patients in the CSV.
+    :param data: DataFrame containing the data
+    """
+    # Extract the 'max surface' and 'duree_tki' columns
+    max_surface = data['min score']
+    duree_tki = data['duree_tki']
+
+    # Create the scatter plot
+    plt.scatter(duree_tki, max_surface)
+    plt.xlabel('Durée TKI')
+    plt.ylabel('Min prediction score')
+    plt.title('Min prediction score on all slices vs TKI for all patients')
+
+    plt.ylim(0, 1)
+
+    # Show the plot
+    plt.show()
+
+
+def average_score_duree(data):
+    """
+    Scatter plot of 'max surface' versus 'duree_tki' for all patients in the CSV.
+    :param data: DataFrame containing the data
+    """
+    # Extract the 'max surface' and 'duree_tki' columns
+    max_surface = data['average score']
+    duree_tki = data['duree_tki']
+
+    # Create the scatter plot
+    plt.scatter(duree_tki, max_surface)
+    plt.xlabel('Durée TKI')
+    plt.ylabel('Average prediction score')
+    plt.title('Average prediction score on all slices vs TKI for all patients')
+
+    plt.ylim(0, 1)
+
+    # Show the plot
+    plt.show()
+
+
+def max_surface_duree(data):
+    """
+    Scatter plot of 'max surface' versus 'duree_tki' for all patients in the CSV.
+    :param data: DataFrame containing the data
+    """
+    # Extract the 'max surface' and 'duree_tki' columns
+    max_surface = data['max surface']
+    duree_tki = data['duree_tki']
+
+    # Create the scatter plot
+    plt.scatter(duree_tki, max_surface)
+    plt.xlabel('Durée TKI')
+    plt.ylabel('Max surface')
+    plt.title('Maximum surface vs Durée TKI for all patients')
+
+
+    # Show the plot
+    plt.show()
+
+def min_surface_duree(data):
+    """
+    Scatter plot of 'max surface' versus 'duree_tki' for all patients in the CSV.
+    :param data: DataFrame containing the data
+    """
+    # Extract the 'max surface' and 'duree_tki' columns
+    max_surface = data['min surface']
+    duree_tki = data['duree_tki']
+
+    # Create the scatter plot
+    plt.scatter(duree_tki, max_surface)
+    plt.xlabel('Durée TKI')
+    plt.ylabel('Min surface')
+    plt.title('Minimum surface vs Durée TKI for all patients')
+
+
+    # Show the plot
+    plt.show()
+
+
+def average_surface_duree(data):
+    """
+    Scatter plot of 'max surface' versus 'duree_tki' for all patients in the CSV.
+    :param data: DataFrame containing the data
+    """
+    # Extract the 'max surface' and 'duree_tki' columns
+    max_surface = data['average surface']
+    duree_tki = data['duree_tki']
+
+    # Create the scatter plot
+    plt.scatter(duree_tki, max_surface)
+    plt.xlabel('Durée TKI')
+    plt.ylabel('Average surface')
+    plt.title('Average surface vs Durée TKI for all patients')
+
+
+    # Show the plot
+    plt.show()
+
+def max_score_volume(data):
+    """
+    Scatter plot of 'max surface' versus 'duree_tki' for all patients in the CSV.
+    :param data: DataFrame containing the data
+    """
+    # Extract the 'max surface' and 'duree_tki' columns
+    max_surface = data['max score']
+    duree_tki = data['volume']
+
+    # Create the scatter plot
+    plt.scatter(duree_tki, max_surface)
+    plt.xlabel('Volume')
+    plt.ylabel('Max score')
+    plt.title('Maximum score vs Volume for all patients')
+
+    plt.ylim(0, 1)
+
+    # Show the plot
+    plt.show()
+
+def min_score_volume(data):
+    """
+    Scatter plot of 'max surface' versus 'duree_tki' for all patients in the CSV.
+    :param data: DataFrame containing the data
+    """
+    # Extract the 'max surface' and 'duree_tki' columns
+    max_surface = data['min score']
+    duree_tki = data['volume']
+
+    # Create the scatter plot
+    plt.scatter(duree_tki, max_surface)
+    plt.xlabel('Volume')
+    plt.ylabel('min score')
+    plt.title('Minimum score vs Volume for all patients')
+
+    plt.ylim(0, 1)
+
+    # Show the plot
+    plt.show()
+
+def average_score_volume(data):
+    """
+    Scatter plot of 'max surface' versus 'duree_tki' for all patients in the CSV.
+    :param data: DataFrame containing the data
+    """
+    # Extract the 'max surface' and 'duree_tki' columns
+    max_surface = data['average score']
+    duree_tki = data['volume']
+
+    # Create the scatter plot
+    plt.scatter(duree_tki, max_surface)
+    plt.xlabel('Volume')
+    plt.ylabel('average score')
+    plt.title('Average score vs Volume for all patients')
+
+    plt.ylim(0, 1)
+
+    # Show the plot
+    plt.show()
+
+def min_score_max_surface(data):
+    """
+    Scatter plot of 'max surface' versus 'duree_tki' for all patients in the CSV.
+    :param data: DataFrame containing the data
+    """
+    # Extract the 'max surface' and 'duree_tki' columns
+    max_surface = data['min score']
+    duree_tki = data['max surface']
+
+    # Create the scatter plot
+    plt.scatter(duree_tki, max_surface)
+    plt.xlabel('Max Tumor surface')
+    plt.ylabel('Score minimum')
+    plt.title('Score minimum vs surface maximum for all patients')
+
+    plt.ylim(0, 1)
+
+    # Show the plot
+    plt.show()
+
+
+def min_score_av_surface(data):
+    """
+    Scatter plot of 'max surface' versus 'duree_tki' for all patients in the CSV.
+    :param data: DataFrame containing the data
+    """
+    # Extract the 'max surface' and 'duree_tki' columns
+    max_surface = data['min score']
+    duree_tki = data['average surface']
+
+    # Create the scatter plot
+    plt.scatter(duree_tki, max_surface)
+    plt.xlabel('Average Tumor surface')
+    plt.ylabel('Score minimum')
+    plt.title('Score minimum vs average surface for all patients')
+
+    plt.ylim(0, 1)
+
+    # Show the plot
+    plt.show()
+
 
 
 def scatter_plot_groups(preds):
@@ -283,24 +618,58 @@ def scatter_plot_groups(preds):
     plt.show()
 
 
-
-
 # plot_correlation_matrix()
 
 
-# Un seul affichage pour les trois
-plot_scores_surfaces(preds_uniform, '2-21-0049')
-#plot_scores_surfaces(preds_uniform, '2-21-0049')
+# Predictions, predictions avec seulement tumeur et prédictions avec seulement autour
+# plot_scores_surfaces_three(preds, preds_only_tumors_test, preds_only_surroundings_test, '2-21-0049')
+
+#predictions vs predictions avec signe inversé.
+# plot_score_surface_two(preds, preds_inverted, '2-22-0191')
+# min_score_av_surface(preds_only_surroundings)
+# min_score_max_surface(preds_only_surroundings)
+average_score_duree(preds)
+# plot_scores_surfaces(preds, '2-21-0049')
+# plot_scores_surfaces(preds_only_tumors_test, '2-21-0049')
+# plot_scores_surfaces(preds_only_surroundings_test, '2-21-0049')
+
+# plot_scores_surfaces(preds_uniform, '2-21-0049')
 # plot_scores_surfaces(preds_strides, '2-21-0060')
 
-# Un seul affichage pour les trois
+# max_score_duree(preds_only_surroundings)
+# min_score_duree(preds_only_surroundings)
+#
+# max_surface_duree(preds)
+#average_surface_duree(preds)
+#
+#max_score_volume(preds_only_surroundings)
+# min_score_volume(preds_only_surroundings)
+# average_score_volume(preds)
+#
+## min_score_duree(preds_only_tumor)
+#
+# max_surface_duree(preds_only_tumor)
+# average_surface_duree(preds_only_tumor)
+#
+# max_score_volume(preds_only_tumor)
+# min_score_volume(preds_only_tumor)
+# average_score_volume(preds_only_tumor)
+#
+# max_score_duree(preds_only_surroundings)
+# min_score_duree(preds_only_surroundings)
+#
+# max_surface_duree(preds_only_surroundings)
+# average_surface_duree(preds_only_surroundings)
+#
+# max_score_volume(preds_only_surroundings)
+# min_score_volume(preds_only_surroundings)
+# average_score_volume(preds_only_surroundings)
 
-#various_plots(preds)
-#various_plots(preds_uniform)
+# various_plots(preds_uniform)
 # various_plots(preds_strides)
 
 # Un seul affichage pour les trois
-#scatter_plot_groups(preds_uniform)
+# scatter_plot_groups(preds_only_tumor)
 # scatter_plot_groups(preds_no_tresh)
 # scatter_plot_groups(preds_strides)
 

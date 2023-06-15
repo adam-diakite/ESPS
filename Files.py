@@ -253,3 +253,5 @@ def copy_nii_files(folder_path):
 
 #cleaning for errors
 delete_image_dirs('/media/adamdiakite/LaCie/database_dijon')
+
+

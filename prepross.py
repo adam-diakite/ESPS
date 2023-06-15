@@ -331,7 +331,7 @@ def resize_image(image, target_size):
     return resized_image
 
 
-def multi_input_array(folder_path):
+def nii_to_img(folder_path):
     """
     Creates 224x224 tumor images from .nii files.
     :param folder_path: path to segmentation and scan folder
@@ -420,6 +420,116 @@ def multi_input_array(folder_path):
     patient_id = file_name[:9]  # Extract the first 9 characters
     print('Patient ID:', patient_id)
 
+    # Display zoomed slices
+    num_slices = len(zoomed_slices)
+    num_cols = 5  # Number of columns in the plot
+    num_rows = (num_slices + num_cols - 1) // num_cols  # Calculate number of rows
+
+    plt.figure(figsize=(15, 3 * num_rows))  # Set figure size
+
+    for i, slice_img in enumerate(zoomed_slices):
+        plt.subplot(num_rows, num_cols, i + 1)
+        plt.imshow(slice_img, cmap='gray')
+        plt.axis('off')
+
+    plt.tight_layout()
+    plt.show()
+
+    return zoomed_slices, patient_id, tumor_area
+
+def nii_to_img_inverted(folder_path):
+    """
+    Creates 224x224 tumor images from .nii files with inverted values in zoomed_slices.
+    :param folder_path: path to segmentation and scan folder
+    :return: zoomed_slices, tumor_area, patient_id
+    """
+    files = os.listdir(folder_path)
+    scan_path = None
+    mask_path = None
+    desired_shape = 224
+
+    # Find scan and mask files
+    for file in files:
+        if 'segmentation' in file.lower() or file.endswith('.nii'):
+            mask_path = os.path.join(folder_path, file)
+        else:
+            scan_path = os.path.join(folder_path, file)
+
+    if scan_path is None or mask_path is None:
+        print('Scan or mask file not found')
+        return None, None, None
+
+    # Load scan and mask data
+    scan_img = nib.load(scan_path)
+    mask_img = nib.load(mask_path)
+
+    scan_data = scan_img.get_fdata()
+    mask_data = mask_img.get_fdata()
+
+    # Change the voxel size of the mask to 1x1x1
+    mask_header = mask_img.header.copy()
+    mask_header.set_zooms((1, 1, 1))
+
+    # Coordonnées de la tumeur en se servant du masque
+    tumor_coords = mask_data.nonzero()
+    min_x, max_x = min(tumor_coords[1]), max(tumor_coords[1])
+    min_y, max_y = min(tumor_coords[0]), max(tumor_coords[0])
+    tumor_width = max_x - min_x
+    tumor_height = max_y - min_y
+    center_x = (max_x + min_x) // 2
+    center_y = (max_y + min_y) // 2
+
+    # Calculate the zoomed bounding box coordinates
+    zoomed_min_x = max(center_x - tumor_width // 2 - 10, 0)
+    zoomed_max_x = min(center_x + tumor_width // 2 + 10, scan_data.shape[1] - 1)
+    zoomed_min_y = max(center_y - tumor_height // 2 - 10, 0)
+    zoomed_max_y = min(center_y + tumor_height // 2 + 10, scan_data.shape[0] - 1)
+
+    # Calculate the required padding to achieve a square shape of 224x224
+    current_width = zoomed_max_x - zoomed_min_x
+    current_height = zoomed_max_y - zoomed_min_y
+
+    if current_width > current_height:
+        diff = current_width - current_height
+        pad_top = diff // 2
+        pad_bottom = diff - pad_top
+        zoomed_min_y = max(zoomed_min_y - pad_top, 0)
+        zoomed_max_y = min(zoomed_max_y + pad_bottom, scan_data.shape[0] - 1)
+    elif current_height > current_width:
+        diff = current_height - current_width
+        pad_left = diff // 2
+        pad_right = diff - pad_left
+        zoomed_min_x = max(zoomed_min_x - pad_left, 0)
+        zoomed_max_x = min(zoomed_max_x + pad_right, scan_data.shape[1] - 1)
+
+    zoomed_slices = []
+    zoomed_tumors = []
+    tumor_area = []
+
+    for slice_index in range(scan_data.shape[2]):
+        if np.any(mask_data[:, :, slice_index]):
+            zoomed_slice = scan_data[zoomed_min_y:zoomed_max_y, zoomed_min_x:zoomed_max_x, slice_index]
+            try:
+                zoomed_slice_resized = cv2.resize(zoomed_slice, (desired_shape, desired_shape))
+                zoomed_slice_resized = cv2.rotate(zoomed_slice_resized, cv2.ROTATE_90_CLOCKWISE)
+                zoomed_slice_resized = cv2.flip(zoomed_slice_resized, 1)
+
+                # Invert the sign of the values
+                zoomed_slice_resized = -zoomed_slice_resized
+
+                zoomed_slices.append(zoomed_slice_resized)
+                tumor_area.append(np.sum(mask_data[:, :, slice_index]))
+            except cv2.error as e:
+                print(f"Error occurred during resizing: {e}. Skipping patient.")
+                continue
+
+    zoomed_slices = zoomed_slices[::-1]  # reversing using list slicing
+
+    # Extract patient ID from scan file name
+    file_name = os.path.basename(scan_path)
+    patient_id = file_name[:9]  # Extract the first 9 characters
+    print('Patient ID:', patient_id)
+
     # # Display zoomed slices
     # num_slices = len(zoomed_slices)
     # num_cols = 5  # Number of columns in the plot
@@ -438,10 +548,465 @@ def multi_input_array(folder_path):
     return zoomed_slices, patient_id, tumor_area
 
 
+def nii_to_only_tumor(folder_path):
+    """
+    Creates zoomed tumor images from .nii files using the mask to select pixels.
+    :param folder_path: path to segmentation and scan folder
+    :return: zoomed_slices, tumor_area, patient_id
+    """
+    files = os.listdir(folder_path)
+    scan_path = None
+    mask_path = None
+    desired_shape = 224
+
+    # Find scan and mask files
+    for file in files:
+        if 'segmentation' in file.lower() or file.endswith('.nii'):
+            mask_path = os.path.join(folder_path, file)
+        else:
+            scan_path = os.path.join(folder_path, file)
+
+    if scan_path is None or mask_path is None:
+        print('Scan or mask file not found')
+        return None, None, None
+
+    # Load scan and mask data
+    scan_img = nib.load(scan_path)
+    mask_img = nib.load(mask_path)
+
+    scan_data = scan_img.get_fdata()
+    mask_data = mask_img.get_fdata()
+
+    scan_data = scan_data.astype(np.float32)
+
+    # Set values greater than 700 to 700
+    scan_data[scan_data > 700] = 700
+
+    min_max_scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1), copy=False)
+    ascolumns = scan_data.reshape(-1, 1)
+    t = min_max_scaler.fit_transform(ascolumns)
+    scan_data = t.reshape(scan_data.shape)
+
+    # Coordonnées de la tumeur en se servant du masque
+    tumor_coords = mask_data.nonzero()
+    min_x, max_x = min(tumor_coords[1]), max(tumor_coords[1])
+    min_y, max_y = min(tumor_coords[0]), max(tumor_coords[0])
+    tumor_width = max_x - min_x
+    tumor_height = max_y - min_y
+    center_x = (max_x + min_x) // 2
+    center_y = (max_y + min_y) // 2
+
+    # Calculate the zoomed bounding box coordinates
+    zoomed_min_x = max(center_x - tumor_width // 2 - 10, 0)
+    zoomed_max_x = min(center_x + tumor_width // 2 + 10, scan_data.shape[1] - 1)
+    zoomed_min_y = max(center_y - tumor_height // 2 - 10, 0)
+    zoomed_max_y = min(center_y + tumor_height // 2 + 10, scan_data.shape[0] - 1)
+
+    # Calculate the required padding to achieve a square shape of 224x224
+    current_width = zoomed_max_x - zoomed_min_x
+    current_height = zoomed_max_y - zoomed_min_y
+
+    if current_width > current_height:
+        diff = current_width - current_height
+        pad_top = diff // 2
+        pad_bottom = diff - pad_top
+        zoomed_min_y = max(zoomed_min_y - pad_top, 0)
+        zoomed_max_y = min(zoomed_max_y + pad_bottom, scan_data.shape[0] - 1)
+    elif current_height > current_width:
+        diff = current_height - current_width
+        pad_left = diff // 2
+        pad_right = diff - pad_left
+        zoomed_min_x = max(zoomed_min_x - pad_left, 0)
+        zoomed_max_x = min(zoomed_max_x + pad_right, scan_data.shape[1] - 1)
+
+    zoomed_slices = []
+    tumor_area = []
+
+    for slice_index in range(scan_data.shape[2]):
+        if np.any(mask_data[:, :, slice_index]):
+            # Select pixels from the scan using the mask
+            zoomed_slice = scan_data[zoomed_min_y:zoomed_max_y, zoomed_min_x:zoomed_max_x, slice_index]
+            mask_slice = mask_data[zoomed_min_y:zoomed_max_y, zoomed_min_x:zoomed_max_x, slice_index]
+
+            # Set non-tumor pixels to -1 in the scan
+            zoomed_slice[mask_slice == 0] = -1000
+
+            try:
+                zoomed_slice_resized = cv2.resize(zoomed_slice, (desired_shape, desired_shape))
+                zoomed_slice_resized = cv2.rotate(zoomed_slice_resized, cv2.ROTATE_90_CLOCKWISE)
+                zoomed_slice_resized = cv2.flip(zoomed_slice_resized, 1)
+                zoomed_slices.append(zoomed_slice_resized)
+                tumor_area.append(np.sum(mask_data[:, :, slice_index]))
+            except cv2.error as e:
+                print(f"Error occurred during resizing: {e}. Skipping patient.")
+                continue
+
+    zoomed_slices = zoomed_slices[::-1]  # reversing using list slicing
+
+    # Extract patient ID from scan file name
+    file_name = os.path.basename(scan_path)
+    patient_id = file_name[:9]  # Extract the first 9 characters
+    print('Patient ID:', patient_id)
+
+    # Display zoomed slices
+    num_slices = len(zoomed_slices)
+    num_cols = 5  # Number of columns in the plot
+    num_rows = (num_slices + num_cols - 1) // num_cols  # Calculate number of rows
+
+    plt.figure(figsize=(15, 3 * num_rows))  # Set figure size
+
+    for i, slice_img in enumerate(zoomed_slices):
+        plt.subplot(num_rows, num_cols, i + 1)
+        plt.imshow(slice_img, cmap='gray')
+        plt.axis('off')
+
+    plt.tight_layout()
+    plt.show()
+
+    return zoomed_slices, patient_id, tumor_area
 
 
+def nii_to_only_surr(folder_path):
+    """
+    Creates zoomed tumor images from .nii files using the mask to select pixels.
+    :param folder_path: path to segmentation and scan folder
+    :return: zoomed_slices, tumor_area, patient_id
+    """
+    files = os.listdir(folder_path)
+    scan_path = None
+    mask_path = None
+    desired_shape = 224
 
-def save_arrays_to_hdf5(array, patient_id, tumor_area):
+    # Find scan and mask files
+    for file in files:
+        if 'segmentation' in file.lower() or file.endswith('.nii'):
+            mask_path = os.path.join(folder_path, file)
+        else:
+            scan_path = os.path.join(folder_path, file)
+
+    if scan_path is None or mask_path is None:
+        print('Scan or mask file not found')
+        return None, None, None
+
+    # Load scan and mask data
+    scan_img = nib.load(scan_path)
+    mask_img = nib.load(mask_path)
+
+    scan_data = scan_img.get_fdata()
+    mask_data = mask_img.get_fdata()
+
+    # Coordonnées de la tumeur en se servant du masque
+    tumor_coords = mask_data.nonzero()
+    min_x, max_x = min(tumor_coords[1]), max(tumor_coords[1])
+    min_y, max_y = min(tumor_coords[0]), max(tumor_coords[0])
+    tumor_width = max_x - min_x
+    tumor_height = max_y - min_y
+    center_x = (max_x + min_x) // 2
+    center_y = (max_y + min_y) // 2
+
+    # Calculate the zoomed bounding box coordinates
+    zoomed_min_x = max(center_x - tumor_width // 2 - 10, 0)
+    zoomed_max_x = min(center_x + tumor_width // 2 + 10, scan_data.shape[1] - 1)
+    zoomed_min_y = max(center_y - tumor_height // 2 - 10, 0)
+    zoomed_max_y = min(center_y + tumor_height // 2 + 10, scan_data.shape[0] - 1)
+
+    # Calculate the required padding to achieve a square shape of 224x224
+    current_width = zoomed_max_x - zoomed_min_x
+    current_height = zoomed_max_y - zoomed_min_y
+
+    if current_width > current_height:
+        diff = current_width - current_height
+        pad_top = diff // 2
+        pad_bottom = diff - pad_top
+        zoomed_min_y = max(zoomed_min_y - pad_top, 0)
+        zoomed_max_y = min(zoomed_max_y + pad_bottom, scan_data.shape[0] - 1)
+    elif current_height > current_width:
+        diff = current_height - current_width
+        pad_left = diff // 2
+        pad_right = diff - pad_left
+        zoomed_min_x = max(zoomed_min_x - pad_left, 0)
+        zoomed_max_x = min(zoomed_max_x + pad_right, scan_data.shape[1] - 1)
+
+    zoomed_slices = []
+    tumor_area = []
+
+    for slice_index in range(scan_data.shape[2]):
+        if np.any(mask_data[:, :, slice_index]):
+
+            zoomed_slice = scan_data[zoomed_min_y:zoomed_max_y, zoomed_min_x:zoomed_max_x, slice_index]
+            mask_slice = mask_data[zoomed_min_y:zoomed_max_y, zoomed_min_x:zoomed_max_x, slice_index]
+
+            # Set tumor pixels to -1 in the scan
+            zoomed_slice[mask_slice == 1] = -1000
+
+            try:
+                zoomed_slice_resized = cv2.resize(zoomed_slice, (desired_shape, desired_shape))
+                zoomed_slice_resized = cv2.rotate(zoomed_slice_resized, cv2.ROTATE_90_CLOCKWISE)
+                zoomed_slice_resized = cv2.flip(zoomed_slice_resized, 1)
+
+                # Scale the zoomed slice between -1 and 1
+                min_max_scaler = preprocessing.MinMaxScaler(feature_range=(0, 1), copy=False)
+                scaled_zoomed_slice = min_max_scaler.fit_transform(zoomed_slice_resized.astype(np.float32))
+                zoomed_slice_scaled = 2 * scaled_zoomed_slice - 1
+
+                zoomed_slices.append(zoomed_slice_scaled)
+                tumor_area.append(np.sum(mask_data[:, :, slice_index]))
+            except cv2.error as e:
+                print(f"Error occurred during resizing: {e}. Skipping patient.")
+                continue
+
+    zoomed_slices = zoomed_slices[::-1]  # slices aren't in the right order
+
+    # Extract patient ID from scan file name
+    file_name = os.path.basename(scan_path)
+    patient_id = file_name[:9]  # Extract the first 9 characters
+    print('Patient ID:', patient_id)
+
+    # Display zoomed slices
+    num_slices = len(zoomed_slices)
+    num_cols = 5  # Number of columns in the plot
+    num_rows = (num_slices + num_cols - 1) // num_cols  # Calculate number of rows
+
+    plt.figure(figsize=(15, 3 * num_rows))  # Set figure size
+
+    for i, slice_img in enumerate(zoomed_slices):
+        plt.subplot(num_rows, num_cols, i + 1)
+        plt.imshow(slice_img, cmap='gray')
+        plt.axis('off')
+
+    plt.tight_layout()
+    plt.show()
+
+    return zoomed_slices, patient_id, tumor_area
+
+
+def nii_to_only_surr_test(folder_path):
+    """
+    Creates zoomed tumor images from .nii files using the mask to select pixels.
+    :param folder_path: path to segmentation and scan folder
+    :return: zoomed_slices, patient_id, tumor_area
+    """
+    files = os.listdir(folder_path)
+    scan_path = None
+    mask_path = None
+    desired_shape = 224
+
+    # Find scan and mask files
+    for file in files:
+        if 'segmentation' in file.lower() or file.endswith('.nii'):
+            mask_path = os.path.join(folder_path, file)
+        else:
+            scan_path = os.path.join(folder_path, file)
+
+    if scan_path is None or mask_path is None:
+        print('Scan or mask file not found')
+        return None, None, None
+
+    # Load scan and mask data
+    scan_img = nib.load(scan_path)
+    mask_img = nib.load(mask_path)
+
+    scan_data = scan_img.get_fdata()
+    mask_data = mask_img.get_fdata()
+
+    # Coordonnées de la tumeur en se servant du masque
+    tumor_coords = mask_data.nonzero()
+    min_x, max_x = min(tumor_coords[1]), max(tumor_coords[1])
+    min_y, max_y = min(tumor_coords[0]), max(tumor_coords[0])
+    tumor_width = max_x - min_x
+    tumor_height = max_y - min_y
+    center_x = (max_x + min_x) // 2
+    center_y = (max_y + min_y) // 2
+
+    # Calculate the zoomed bounding box coordinates
+    zoomed_min_x = max(center_x - tumor_width // 2 - 10, 0)
+    zoomed_max_x = min(center_x + tumor_width // 2 + 10, scan_data.shape[1] - 1)
+    zoomed_min_y = max(center_y - tumor_height // 2 - 10, 0)
+    zoomed_max_y = min(center_y + tumor_height // 2 + 10, scan_data.shape[0] - 1)
+
+    # Calculate the required padding to achieve a square shape of 224x224
+    current_width = zoomed_max_x - zoomed_min_x
+    current_height = zoomed_max_y - zoomed_min_y
+
+    if current_width > current_height:
+        diff = current_width - current_height
+        pad_top = diff // 2
+        pad_bottom = diff - pad_top
+        zoomed_min_y = max(zoomed_min_y - pad_top, 0)
+        zoomed_max_y = min(zoomed_max_y + pad_bottom, scan_data.shape[0] - 1)
+    elif current_height > current_width:
+        diff = current_height - current_width
+        pad_left = diff // 2
+        pad_right = diff - pad_left
+        zoomed_min_x = max(zoomed_min_x - pad_left, 0)
+        zoomed_max_x = min(zoomed_max_x + pad_right, scan_data.shape[1] - 1)
+
+    zoomed_slices = []
+    tumor_area = []
+
+    for slice_index in range(scan_data.shape[2]):
+        if np.any(mask_data[:, :, slice_index]):
+            zoomed_slice = scan_data[zoomed_min_y:zoomed_max_y, zoomed_min_x:zoomed_max_x, slice_index]
+            mask_slice = mask_data[zoomed_min_y:zoomed_max_y, zoomed_min_x:zoomed_max_x, slice_index]
+
+            # Scale the zoomed slice between -1 and 1
+            min_max_scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1), copy=False)
+            scaled_zoomed_slice = min_max_scaler.fit_transform(zoomed_slice)
+
+            # Set tumor pixels to -10 in the scaled zoomed slice
+            scaled_zoomed_slice[mask_slice == 1] = -1
+
+            try:
+                zoomed_slice_resized = cv2.resize(scaled_zoomed_slice, (desired_shape, desired_shape))
+                zoomed_slice_resized = cv2.rotate(zoomed_slice_resized, cv2.ROTATE_90_CLOCKWISE)
+                zoomed_slice_resized = cv2.flip(zoomed_slice_resized, 1)
+
+                zoomed_slices.append(zoomed_slice_resized)
+                tumor_area.append(np.sum(mask_data[:, :, slice_index]))
+            except cv2.error as e:
+                print(f"Error occurred during resizing: {e}. Skipping patient.")
+                continue
+
+    zoomed_slices = zoomed_slices[::-1]  # Reverse the order of slices
+
+    # Extract patient ID from scan file name
+    file_name = os.path.basename(scan_path)
+    patient_id = file_name[:9]  # Extract the first 9 characters
+    print('Patient ID:', patient_id)
+
+    # # Display zoomed slices
+    # num_slices = len(zoomed_slices)
+    # num_cols = 5  # Number of columns in the plot
+    # num_rows = (num_slices + num_cols - 1) // num_cols  # Calculate number of rows
+    #
+    # plt.figure(figsize=(15, 3 * num_rows))  # Set figure size
+    #
+    # for i, slice_img in enumerate(zoomed_slices):
+    #     plt.subplot(num_rows, num_cols, i + 1)
+    #     plt.imshow(slice_img, cmap='gray')
+    #     plt.axis('off')
+    #
+    # plt.tight_layout()
+    # plt.show()
+
+    return zoomed_slices, patient_id, tumor_area
+
+
+def nii_to_only_tumor_test(folder_path):
+    """
+    Creates zoomed tumor images from .nii files using the mask to select pixels.
+    :param folder_path: path to segmentation and scan folder
+    :return: zoomed_slices, patient_id, tumor_area
+    """
+    files = os.listdir(folder_path)
+    scan_path = None
+    mask_path = None
+    desired_shape = 224
+
+    # Find scan and mask files
+    for file in files:
+        if 'segmentation' in file.lower() or file.endswith('.nii'):
+            mask_path = os.path.join(folder_path, file)
+        else:
+            scan_path = os.path.join(folder_path, file)
+
+    if scan_path is None or mask_path is None:
+        print('Scan or mask file not found')
+        return None, None, None
+
+    # Load scan and mask data
+    scan_img = nib.load(scan_path)
+    mask_img = nib.load(mask_path)
+
+    scan_data = scan_img.get_fdata()
+    mask_data = mask_img.get_fdata()
+
+    # Coordonnées de la tumeur en se servant du masque
+    tumor_coords = mask_data.nonzero()
+    min_x, max_x = min(tumor_coords[1]), max(tumor_coords[1])
+    min_y, max_y = min(tumor_coords[0]), max(tumor_coords[0])
+    tumor_width = max_x - min_x
+    tumor_height = max_y - min_y
+    center_x = (max_x + min_x) // 2
+    center_y = (max_y + min_y) // 2
+
+    # Calculate the zoomed bounding box coordinates
+    zoomed_min_x = max(center_x - tumor_width // 2 - 10, 0)
+    zoomed_max_x = min(center_x + tumor_width // 2 + 10, scan_data.shape[1] - 1)
+    zoomed_min_y = max(center_y - tumor_height // 2 - 10, 0)
+    zoomed_max_y = min(center_y + tumor_height // 2 + 10, scan_data.shape[0] - 1)
+
+    # Calculate the required padding to achieve a square shape of 224x224
+    current_width = zoomed_max_x - zoomed_min_x
+    current_height = zoomed_max_y - zoomed_min_y
+
+    if current_width > current_height:
+        diff = current_width - current_height
+        pad_top = diff // 2
+        pad_bottom = diff - pad_top
+        zoomed_min_y = max(zoomed_min_y - pad_top, 0)
+        zoomed_max_y = min(zoomed_max_y + pad_bottom, scan_data.shape[0] - 1)
+    elif current_height > current_width:
+        diff = current_height - current_width
+        pad_left = diff // 2
+        pad_right = diff - pad_left
+        zoomed_min_x = max(zoomed_min_x - pad_left, 0)
+        zoomed_max_x = min(zoomed_max_x + pad_right, scan_data.shape[1] - 1)
+
+    zoomed_slices = []
+    tumor_area = []
+
+    for slice_index in range(scan_data.shape[2]):
+        if np.any(mask_data[:, :, slice_index]):
+            zoomed_slice = scan_data[zoomed_min_y:zoomed_max_y, zoomed_min_x:zoomed_max_x, slice_index]
+            mask_slice = mask_data[zoomed_min_y:zoomed_max_y, zoomed_min_x:zoomed_max_x, slice_index]
+
+            # Scale the zoomed slice between -1 and 1
+            min_max_scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1), copy=False)
+            ascolumns = zoomed_slice.reshape(-1, 1)
+            t = min_max_scaler.fit_transform(ascolumns)
+            scaled_zoomed_slice = t.reshape(zoomed_slice.shape)
+
+            # Set tumor pixels to -10 in the scaled zoomed slice
+            scaled_zoomed_slice[mask_slice == 0] = -1
+
+            try:
+                zoomed_slice_resized = cv2.resize(scaled_zoomed_slice, (desired_shape, desired_shape))
+                zoomed_slice_resized = cv2.rotate(zoomed_slice_resized, cv2.ROTATE_90_CLOCKWISE)
+                zoomed_slice_resized = cv2.flip(zoomed_slice_resized, 1)
+
+                zoomed_slices.append(zoomed_slice_resized)
+                tumor_area.append(np.sum(mask_data[:, :, slice_index]))
+            except cv2.error as e:
+                print(f"Error occurred during resizing: {e}. Skipping patient.")
+                continue
+
+    zoomed_slices = zoomed_slices[::-1]  # Reverse the order of slices
+
+    # Extract patient ID from scan file name
+    file_name = os.path.basename(scan_path)
+    patient_id = file_name[:9]  # Extract the first 9 characters
+    print('Patient ID:', patient_id)
+
+    # # Display zoomed slices
+    # num_slices = len(zoomed_slices)
+    # num_cols = 5  # Number of columns in the plot
+    # num_rows = (num_slices + num_cols - 1) // num_cols  # Calculate number of rows
+    #
+    # plt.figure(figsize=(15, 3 * num_rows))  # Set figure size
+    #
+    # for i, slice_img in enumerate(zoomed_slices):
+    #     plt.subplot(num_rows, num_cols, i + 1)
+    #     plt.imshow(slice_img, cmap='gray')
+    #     plt.axis('off')
+    #
+    # plt.tight_layout()
+    # plt.show()
+
+    return zoomed_slices, patient_id, tumor_area
+
+
+def save_img_to_hdf5(array, patient_id, tumor_area):
     """
     Save all the tumor images in an HDF5 file and plot histograms.
     :param array: List or array of tumor images (output of multi_input_array)
@@ -451,7 +1016,7 @@ def save_arrays_to_hdf5(array, patient_id, tumor_area):
     """
     save_location = '/home/adamdiakite/Documents/ESPS-main/HDF5_Test'
 
-    folder_path = os.path.join(save_location, 'patient_data_uniform')
+    folder_path = os.path.join(save_location, 'patient_data_inverted')
     os.makedirs(folder_path, exist_ok=True)  # Creates the patient_data folder if it doesn't exist
 
     filename = os.path.join(folder_path, f'{patient_id}.hdf5')
@@ -473,48 +1038,37 @@ def save_arrays_to_hdf5(array, patient_id, tumor_area):
                     # Set values greater than 700 to 700
                     f_array[f_array > 700] = 700
 
+                    # Min Max Scaler between 0 and 1
                     min_max_scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1), copy=False)
                     ascolumns = f_array.reshape(-1, 1)
                     t = min_max_scaler.fit_transform(ascolumns)
                     scaled_arr = t.reshape(f_array.shape)
 
-                    # Randomize the indices of the flattened array
-                    flattened_indices = np.arange(scaled_arr.size)
-                    np.random.shuffle(flattened_indices)
-
-                    # Reshape the randomized indices to match the array shape
-                    randomized_indices = np.unravel_index(flattened_indices, scaled_arr.shape)
-
-                    # Create a new array with randomized indices
-                    randomized_arr = np.zeros_like(scaled_arr)
-                    randomized_arr[randomized_indices] = scaled_arr.flatten()
-
                     # Group creation in HDF5
-                    slice_group.create_dataset('train', data=randomized_arr, track_order=True)
+                    slice_group.create_dataset('train', data=scaled_arr, track_order=True)
                     slice_group.create_dataset('target', shape=(), dtype='int64', data=1)
 
                     # Get tumor area from the provided tumor_area parameter
                     tumor_area_value = tumor_area[i]
                     slice_group.create_dataset('tumor_area', shape=(), dtype='int64', data=tumor_area_value)
 
-                    if i == 28 or i == 32:
-                        plt.hist(randomized_arr.flatten(), bins=50, alpha=0.5, label=f'Slice {i}')
                 except IndexError as e:
                     print(f"IndexError encountered while processing slice {i}: {e}")
                     print("Skipping to the next slice.")
                     continue
 
-        # Plot the histograms
-        plt.xlabel('Pixel Value')
-        plt.ylabel('Frequency')
-        plt.title('Histogram of Pixel Values')
-        plt.legend()
-        plt.show()
+        # # Plot the histograms
+        # plt.xlabel('Pixel Value')
+        # plt.ylabel('Frequency')
+        # plt.title('Histogram of Pixel Values')
+        # plt.legend()
+        # plt.show()
 
         print("Arrays saved to HDF5 file.")
     except EOFError as e:
         print(f"Error encountered while saving HDF5 file: {e}")
         print("Skipping to the next file.")
+
 
 def process_scan_folder(root_folder):
     """
@@ -527,12 +1081,17 @@ def process_scan_folder(root_folder):
             folder_path = os.path.join(root, folder_name)
             if folder_name.lower() == 'scans':
                 # Process 'scans' subfolder
-                result = multi_input_array(folder_path)
+                result = nii_to_img_inverted(folder_path)  ### modify here
                 if result is not None:
                     array, patient_id, tumor_area = result
-                    save_arrays_to_hdf5(array, patient_id, tumor_area)
+                    save_img_to_hdf5(array, patient_id, tumor_area)
 
 
-process_scan_folder('/media/adamdiakite/LaCie/patient49')
+# nii_to_img( '/media/adamdiakite/LaCie/database_paris/2-21-0049-2-21-0049/20120419-THORAX/2-ThoraxAbdo IV/scans')
 
-# display_seg("/media/adamdiakite/LaCie/database_paris/2-21-0059-2-21-0059/20081229-THO ABDOPELV CR STD/3-TAP Portal/scans")
+# nii_to_only_tumor('/media/adamdiakite/LaCie/database_paris/2-21-0049-2-21-0049/20120419-THORAX/2-ThoraxAbdo IV/scans')
+# nii_to_only_surr('/media/adamdiakite/LaCie/database_paris/2-21-0049-2-21-0049/20120419-THORAX/2-ThoraxAbdo IV/scans')
+
+process_scan_folder('/media/adamdiakite/LaCie/database_paris')
+
+# display_seg('/media/adamdiakite/LaCie/database_paris/2-21-0005-2-21-0005/20110621-SCANNER THORAX/2-Mediastin/scans')
